@@ -1,0 +1,20 @@
+# Automated tests only: no tenant, token, API listener or persisted user data.
+name: forgeapi-tests
+services:
+  tests:
+    build:
+      context: .
+      target: dev
+    command: [go, test, -race, -count=1, -v, ./...]
+  postgres:
+    image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    environment:
+      POSTGRES_USER: forge
+      POSTGRES_PASSWORD: test-fixture-only
+      POSTGRES_DB: forge
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U forge -d forge"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

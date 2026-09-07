@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"forgeapi/internal/auth"
 	"forgeapi/internal/execution"
 	"forgeapi/internal/store"
 	"github.com/go-chi/chi/v5"
@@ -34,6 +35,7 @@ type API struct {
 	Repo      Repository
 	BaseURL   string
 	CursorKey []byte
+	Auth      auth.Authenticator
 }
 type identityKey struct{}
 
@@ -48,7 +50,7 @@ func (a *API) Handler() http.Handler {
 		a.json(w, 200, map[string]string{"status": "ok", "mode": "local-demo"})
 	})
 	r.Group(func(r chi.Router) {
-		r.Use(a.fixtureIdentity)
+		r.Use(a.authenticate)
 		r.Get("/identity-context", a.identity)
 		r.Get("/execution-templates", a.templates)
 		r.Post("/executions", a.submit)
@@ -110,34 +112,46 @@ func (a *API) localBoundary(next http.Handler) http.Handler {
 	})
 }
 
-func (a *API) fixtureIdentity(next http.Handler) http.Handler {
+func (a *API) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		principal := r.Header.Get("X-Demo-Principal")
-		if r.Header.Get("Authorization") != "" || (principal != "alice" && principal != "bob" && principal != "auditor") {
-			a.problem(w, r, 401, "unauthenticated", "Use X-Demo-Principal: alice, bob, or auditor. Real authentication is not implemented.")
+		if a.Auth == nil {
+			a.problem(w, r, 503, "authentication_unavailable", "Authentication is not configured.")
+			return
+		}
+		identity, err := a.Auth.Authenticate(r)
+		if err != nil {
+			if errors.Is(err, auth.ErrUnavailable) {
+				w.Header().Set("Retry-After", "15")
+				a.problem(w, r, 503, "authentication_unavailable", "Authentication or current grant policy is unavailable.")
+			} else {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="forgeapi"`)
+				a.problem(w, r, 401, "unauthenticated", "Authentication failed. Supply credentials for the configured AUTH_MODE.")
+			}
 			return
 		}
 		if accept := r.Header.Get("Accept"); accept != "" && accept != "application/json" && accept != "*/*" {
 			a.problem(w, r, 406, "unacceptable_representation", "This demo accepts application/json or */*.")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, principal)))
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, identity)))
 	})
 }
 
-func principal(r *http.Request) string { return r.Context().Value(identityKey{}).(string) }
+func principal(r *http.Request) auth.Principal {
+	return r.Context().Value(identityKey{}).(auth.Principal)
+}
 
 func (a *API) identity(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
-	permissions := []string{"execution.submit", "execution.read", "execution.cancel", "execution.data.read", "catalog.read"}
-	if p == "auditor" {
-		permissions = []string{"execution.read", "audit.read"}
+	contexts := []any{}
+	if permissions := p.Permissions(); len(permissions) > 0 {
+		contexts = append(contexts, map[string]any{"application_id": execution.Application, "environment": execution.Environment, "permissions": permissions})
 	}
-	a.json(w, 200, map[string]any{"principal_id": p, "principal_kind": "human", "authorized_contexts": []any{map[string]any{"application_id": execution.Application, "environment": execution.Environment, "permissions": permissions}}})
+	a.json(w, 200, map[string]any{"principal_id": p.ID, "principal_kind": p.Kind, "authorized_contexts": contexts})
 }
 
 func (a *API) templates(w http.ResponseWriter, r *http.Request) {
-	if principal(r) == "auditor" {
+	if !principal(r).Can("catalog.read") {
 		a.problem(w, r, 403, "policy_denied", "Catalog permission required.")
 		return
 	}
@@ -190,7 +204,7 @@ func (a *API) body(w http.ResponseWriter, r *http.Request, optional bool) ([]byt
 }
 
 func (a *API) submit(w http.ResponseWriter, r *http.Request) {
-	if principal(r) == "auditor" {
+	if !principal(r).Can("execution.submit") {
 		a.problem(w, r, 403, "policy_denied", "Submission permission required.")
 		return
 	}
@@ -203,7 +217,7 @@ func (a *API) submit(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, 400, "invalid_execution", err.Error())
 		return
 	}
-	accepted, err := a.Repo.Submit(r.Context(), principal(r), r.Header.Get("Idempotency-Key"), hash, a.BaseURL, spec)
+	accepted, err := a.Repo.Submit(r.Context(), principal(r).OwnerKey, r.Header.Get("Idempotency-Key"), hash, a.BaseURL, spec)
 	if err != nil {
 		a.storeError(w, r, err)
 		return
@@ -212,17 +226,21 @@ func (a *API) submit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) authorized(w http.ResponseWriter, r *http.Request, data bool) (execution.Record, bool) {
+	if !principal(r).Can("execution.read") {
+		a.problem(w, r, 403, "policy_denied", "Execution read permission required.")
+		return execution.Record{}, false
+	}
 	item, err := a.Repo.Get(r.Context(), chi.URLParam(r, "execution_id"))
 	if err != nil {
 		a.storeError(w, r, err)
 		return item, false
 	}
 	p := principal(r)
-	if p != "auditor" && item.Owner != p {
+	if !p.CanRead(item) {
 		a.storeError(w, r, store.ErrNotFound)
 		return item, false
 	}
-	if data && p == "auditor" {
+	if data && !p.Can("execution.data.read") {
 		a.problem(w, r, 403, "policy_denied", "Execution data permission required.")
 		return item, false
 	}
@@ -244,7 +262,7 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) cancel(w http.ResponseWriter, r *http.Request) {
-	if principal(r) == "auditor" {
+	if !principal(r).Can("execution.cancel") {
 		a.problem(w, r, 403, "policy_denied", "Cancellation permission required.")
 		return
 	}
@@ -260,7 +278,7 @@ func (a *API) cancel(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, 400, "invalid_request", err.Error())
 		return
 	}
-	accepted, err := a.Repo.Cancel(r.Context(), principal(r), chi.URLParam(r, "execution_id"), r.Header.Get("Idempotency-Key"), hash, reason)
+	accepted, err := a.Repo.Cancel(r.Context(), principal(r).OwnerKey, chi.URLParam(r, "execution_id"), r.Header.Get("Idempotency-Key"), hash, reason)
 	if err != nil {
 		a.storeError(w, r, err)
 		return
@@ -303,7 +321,7 @@ func (a *API) pagination(w http.ResponseWriter, r *http.Request, total int) (sta
 		}
 		limit = n
 	}
-	c := cursor{Resource: r.URL.Path, Principal: principal(r), Expires: time.Now().Add(time.Hour).Unix()}
+	c := cursor{Resource: r.URL.Path, Principal: principal(r).OwnerKey, Expires: time.Now().Add(time.Hour).Unix()}
 	if token := q.Get("cursor"); token != "" {
 		parts := strings.Split(token, ".")
 		valid := len(parts) == 2 && len(token) <= 2048
@@ -312,7 +330,7 @@ func (a *API) pagination(w http.ResponseWriter, r *http.Request, total int) (sta
 			sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 			m := hmac.New(sha256.New, a.CursorKey)
 			m.Write(b)
-			valid = err == nil && e2 == nil && hmac.Equal(sig, m.Sum(nil)) && json.Unmarshal(b, &c) == nil && c.Resource == r.URL.Path && c.Principal == principal(r) && c.Offset >= 0 && c.Offset <= total
+			valid = err == nil && e2 == nil && hmac.Equal(sig, m.Sum(nil)) && json.Unmarshal(b, &c) == nil && c.Resource == r.URL.Path && c.Principal == principal(r).OwnerKey && c.Offset >= 0 && c.Offset <= total
 		}
 		if !valid {
 			a.problem(w, r, 400, "invalid_cursor", "Cursor is invalid for this request.")

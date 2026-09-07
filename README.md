@@ -1,82 +1,72 @@
 # ForgeAPI — local-first execution API
 
-A Go API for requesting and tracking asynchronous jobs. This first increment runs **locally**, with real PostgreSQL and Temporal and **simulated compute**. No Azure account or infrastructure deployment is needed.
+A Go API for requesting and tracking asynchronous jobs. **Entra sign-in is required.** The API, PostgreSQL, Temporal and worker run locally in Docker; compute is simulated. No Azure hosting or paid resources are needed for this local slice.
 
-Read the [TLDR and roadmap](docs/TLDR.md) first. Use the [demo walkthrough](docs/demo.md) for a meeting. The larger [design package](docs/design/README.md) is reference material, not required onboarding.
+Read the [TLDR and roadmap](docs/TLDR.md). For tomorrow's machine/tenant setup, give the assistant [these exact instructions](docs/work-setup.md). For co-development, start with the short [handoff](docs/handoff.md); the larger design package is reference material, not required onboarding.
 
-## Start everything with Docker
+## Set up and run
 
-Prerequisite: an approved Docker installation with Linux containers (Engine 28+), and `docker compose` (Compose v2.20+ or later). First startup needs access to Docker Hub and Go's module proxy; prebuild before the meeting. Pinned tools/images are recorded in `go.mod`, `go.sum`, and `Dockerfile`/`compose.yaml`. The tested environment is recorded in [progress](docs/progress.md).
+1. Complete the one-time [Entra configuration](docs/entra-local.md): two app registrations, three IDs and a local grant. **No client secret.**
+2. Start Docker, then run:
 
 ```sh
 docker compose up --build -d --wait
-docker compose run --rm demo
+sh scripts/demo.sh
 ```
 
-API: <http://localhost:8080/healthz> · Temporal UI: <http://localhost:8233>
+The helper opens browser sign-in using Microsoft's library and PKCE. It runs the authenticated submission/replay/status/results/cancellation/timeout walkthrough without printing or saving tokens. It exits nonzero on failure. On a headless terminal use `sh scripts/demo.sh -print-login-url` and open the URL in a browser on the **same machine**.
 
-### On your work Mac
+API liveness: <http://localhost:8080/healthz> · Temporal UI: <http://localhost:8233>
 
-Use your organization's approved [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/) installation for Apple silicon or Intel, and start Docker Desktop before running the commands above. No host Go installation is needed for the Docker-only demo or tests. The shell examples work in macOS Terminal's zsh.
+After configuration, rehearse everything with **`sh scripts/verify-local.sh`** (or `make verify-local`): Docker checks → unit/race tests → isolated PostgreSQL tests → startup → browser sign-in and demo. No cloud objects are created by these commands.
 
-The pinned Go, PostgreSQL and Temporal image indexes include both `linux/arm64` and `linux/amd64`. Docker selects the native variant; build the API locally with `--build` as shown above. Do not force `linux/amd64` on Apple silicon. See [Docker's architecture selection guidance](https://docs.docker.com/build/building/multi-platform/).
+### On your Mac
 
-Before the meeting, check `docker compose version` and `docker info`, then run startup, demo and tests on the Mac. Image architecture availability has been checked; execution on an actual Mac has not yet been verified.
+Use your organization's approved [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/), with Linux containers and Compose. No host Go installation is needed. Docker builds a native Mac sign-in helper into the ignored `.local/bin` directory; it runs on the host so the browser callback reaches the right localhost.
 
-### Demo and shutdown
+The pinned Go, PostgreSQL and Temporal image indexes include both `linux/arm64` and `linux/amd64`. Do not force amd64 on Apple silicon. [Docker architecture selection](https://docs.docker.com/build/building/multi-platform/). Image/build availability is not proof of execution on an actual Mac; rehearse on that machine.
 
-The demo checks submission, retry/conflict handling, fixture permissions, events/logs, artifact integrity, cancellation, and timeout. It exits nonzero on failure. It creates only synthetic local records; repeated runs use new request keys.
+Prerequisites: Docker Engine 28+, Compose v2.20+ or later, ports 8080/54329/7233/8233 and the temporary sign-in callback port 8400 available. The helper build supports both classic Docker and BuildKit; no separate Buildx installation is required. First builds need Docker Hub/Go module access; sign-in and API signing-key refresh need outbound HTTPS to Entra. Prebuild before the meeting.
+
+## Tests need no tenant or credentials
 
 ```sh
-docker compose logs -f api worker
-docker compose down
+docker compose -f compose.test.yaml run --build --rm --no-deps tests
+make test-integration
 ```
 
-`down` stops the stack and preserves its named database volumes. Do not use `down -v` unless you intend to erase the local execution and workflow history. Never mount a work repository, cloud credential, or Docker socket into a workload; this simulator launches no workloads at all.
-
-## Run tests
-
-No Go installation is required for the Docker test path:
+The separate test project runs only automated tests and an optional ephemeral PostgreSQL instance. It does not start an API with selectable identities. Without Make:
 
 ```sh
-docker compose run --build --rm --no-deps tests
+docker compose -f compose.test.yaml up -d --wait postgres
+docker compose -f compose.test.yaml run --build --rm --no-deps -e 'FORGE_TEST_DATABASE_URL=postgres://forge:test-fixture-only@postgres:5432/forge?sslmode=disable' tests go test -race -count=1 -v -tags=integration ./internal/store
 ```
 
-With Go 1.27.1 installed, unit/HTTP/workflow tests need **neither Docker nor Azure**:
+With Go 1.27.1 installed, `make check` runs formatting, vet, race tests and build. Native race detection needs a C compiler; the Docker dev image includes one. Targeted examples:
 
 ```sh
-go test ./...
+go test -v ./internal/auth -run TestEntraTokenValidation
+go test -v ./internal/httpapi -run TestEntraHTTPAuthorization
 go test -v ./internal/execution -run TestResolveTemplate
 go test -v ./internal/orchestration -run TestWorkflow
 ```
 
-`make check` adds formatting, vet, race detection, and build. Native race detection needs a supported platform and C compiler; the Docker test image includes one. `make test-integration` runs PostgreSQL concurrency/transaction tests in isolated test schemas. Those tests fail, rather than skip, if their required database is unavailable.
+Auth tests generate synthetic signing keys and replace only the external JWKS response; they do not prove real tenant configuration. Unit/HTTP/workflow tests need neither Docker nor Azure. Tagged database tests fail, rather than skip, if PostgreSQL is unavailable.
 
-Without Make, the equivalent integration commands are:
-
-```sh
-docker compose up -d --wait postgres
-docker compose run --build --rm --no-deps -e 'FORGE_TEST_DATABASE_URL=postgres://forge:local-fixture-only@postgres:5432/forge?sslmode=disable' tests go test -race -count=1 -v -tags=integration ./internal/store
-```
-
-## Faster debugging: dependencies in Docker, Go on the host
+## Stop and inspect
 
 ```sh
-docker compose up -d --wait postgres temporal
-FORGE_MODE=local-demo go run ./cmd/forgeapi migrate
-FORGE_MODE=local-demo go run ./cmd/forgeapi api
-# In a second terminal:
-FORGE_MODE=local-demo go run ./cmd/forgeapi worker
-# In a third terminal:
-go run ./cmd/demo
+docker compose logs --tail=100 api worker
+docker compose down
+docker compose -f compose.test.yaml down
 ```
 
-Stop containerized `api` and `worker` first if already running. On PowerShell, set `$env:FORGE_MODE="local-demo"` before running Go commands instead of the shell prefix. Default host ports: API 8080, PostgreSQL 54329, Temporal 7233, Temporal UI 8233. Each engineer should run a separate local stack; no shared cloud dev environment is needed yet.
+Normal `down` preserves the application's named PostgreSQL and Temporal volumes. Do not use `down -v` unless you intend to erase execution/workflow history. The separate **test** database uses tmpfs and is discarded when stopped. Configuration is needed for Compose to resolve the normal stack even when stopping it; retain `.env` until shutdown.
 
 ## Boundaries
 
-This is an **M1 local development increment**, not full M1 acceptance or a deployable service. `X-Demo-Principal` is an openly selectable fixture identity, **not authentication**. Only synthetic data belongs here. All published ports bind to loopback, browser-origin API calls are rejected, and non-demo startup is rejected. Do not expose this stack through tunnels or deploy it to ACA.
+This is an **M1 local development increment**, not full M1 acceptance or a deployable service. Entra is the only runtime authenticator; `X-Demo-Principal` is rejected. Only synthetic workload data belongs here. All published ports bind to loopback; browser-origin API calls are rejected. Do not expose the stack through tunnels or deploy it to ACA.
 
-PostgreSQL stores API records/outbox/results; the Temporal development server stores workflow history in its own SQLite-backed named volume. That SQLite is Temporal's local server implementation, **not a replacement for the application's PostgreSQL**. Both volumes must be retained together. The project bridge permits outbound networking; it is not a workload sandbox. No production HA, cross-store restore guarantee, Entra/JWKS validation, live provider, or Terraform is implemented.
+PostgreSQL stores API records/outbox/results. Temporal's development server stores its own history in a SQLite-backed named volume, not the application's PostgreSQL. Keep both volumes. The project bridge permits outbound networking; it is not a workload sandbox. PostgreSQL and Temporal's local development interfaces do **not** gain Entra protection from the HTTP API's auth layer.
 
-See [current implementation and next work](docs/progress.md) and [how we collaborate](CONTRIBUTING.md).
+No production HA, cross-store restore guarantee, live provider or Terraform is implemented. No static Azure API key/client secret is used. Managed identities/WIF are the direction for future workloads, not credentials already available in plain local Docker. See [implementation evidence and remaining work](docs/progress.md) and [the meeting walkthrough](docs/demo.md).

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"forgeapi/internal/auth"
 	"forgeapi/internal/execution"
 	"forgeapi/internal/store"
 	"net/http"
@@ -16,6 +17,7 @@ type fixtureRepo struct {
 	record execution.Record
 	err    error
 	calls  int
+	owner  string
 }
 
 func (f *fixtureRepo) Get(_ context.Context, id string) (execution.Record, error) {
@@ -27,8 +29,9 @@ func (f *fixtureRepo) Get(_ context.Context, id string) (execution.Record, error
 	}
 	return f.record, nil
 }
-func (f *fixtureRepo) Submit(_ context.Context, _, _, _, _ string, _ execution.Spec) (store.Accepted, error) {
+func (f *fixtureRepo) Submit(_ context.Context, owner, _, _, _ string, _ execution.Spec) (store.Accepted, error) {
 	f.calls++
+	f.owner = owner
 	b, _ := json.Marshal(f.record.Execution)
 	return store.Accepted{Body: b, Location: f.record.Execution.Links["self"]}, f.err
 }
@@ -39,7 +42,26 @@ func (f *fixtureRepo) Cancel(_ context.Context, _, _, _, _, _ string) (store.Acc
 func fixture() (*API, *fixtureRepo) {
 	r := execution.NewRecord("alice", "http://localhost:8080", execution.Defaults(), time.Now().UTC())
 	repo := &fixtureRepo{record: r}
-	return &API{Repo: repo, BaseURL: "http://localhost:8080", CursorKey: []byte("unit-test-key")}, repo
+	return &API{Repo: repo, BaseURL: "http://localhost:8080", CursorKey: []byte("unit-test-key"), Auth: fixtureIdentity{}}, repo
+}
+
+// Selectable identities exist only in this test binary, never the running API.
+type fixtureIdentity struct{}
+
+func (fixtureIdentity) Authenticate(r *http.Request) (auth.Principal, error) {
+	if len(r.Header.Values("Authorization")) != 0 || len(r.Header.Values("X-Demo-Principal")) != 1 {
+		return auth.Principal{}, auth.ErrUnauthenticated
+	}
+	id := r.Header.Get("X-Demo-Principal")
+	role := "developer"
+	switch id {
+	case "alice", "bob":
+	case "auditor":
+		role = "auditor"
+	default:
+		return auth.Principal{}, auth.ErrUnauthenticated
+	}
+	return auth.Principal{ID: id, Kind: "human", Tenant: "fixture", OwnerKey: id, Role: role}, nil
 }
 func request(h http.Handler, method, path, p, body string, headers map[string]string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, "http://localhost:8080"+path, strings.NewReader(body))

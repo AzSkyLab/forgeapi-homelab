@@ -1,4 +1,7 @@
 .git
+.local
 .env
+.env.*
+config/*.local.json
 bin
 coverage.out

@@ -7,6 +7,14 @@ x-app: &app
     target: runtime
   environment:
     FORGE_MODE: local-demo
+    AUTH_MODE: entra
+    AUTH_TENANT_ID: ${AUTH_TENANT_ID:?Set the approved tenant ID in .env}
+    AUTH_AUDIENCE: ${AUTH_AUDIENCE:?Set the API application client ID in .env}
+    AUTH_ALLOWED_CLIENT_IDS: ${AUTH_CLIENT_ID:?Set the dedicated public client ID in .env}
+    AUTH_DELEGATED_SCOPE: executions.access
+    AUTH_APPLICATION_ROLE: executions.access
+    AUTH_GRANTS_FILE: /config/grants.local.json
+    CURSOR_SIGNING_KEY: ${CURSOR_SIGNING_KEY:?Generate a separate local cursor key in .env}
     LOCAL_CONTAINER: "true"
     LISTEN_ADDR: 0.0.0.0:8080
     PUBLIC_BASE_URL: http://localhost:8080
@@ -68,6 +76,8 @@ services:
     <<: *app
     command: [api]
     ports: ["127.0.0.1:8080:8080"]
+    # Directory mount makes atomic replacement of current grants visible.
+    volumes: ["./config:/config:ro"]
     depends_on:
       migrate: {condition: service_completed_successfully}
     healthcheck:
@@ -82,23 +92,6 @@ services:
     depends_on:
       migrate: {condition: service_completed_successfully}
       temporal: {condition: service_healthy}
-
-  demo:
-    <<: *app
-    profiles: [tools]
-    entrypoint: [/demo]
-    command: [-url, "http://api:8080"]
-    depends_on:
-      api: {condition: service_healthy}
-      worker: {condition: service_started}
-
-  tests:
-    profiles: [tools]
-    build:
-      context: .
-      target: dev
-    command: [go, test, -race, -count=1, -v, ./...]
-    networks: [local]
 
 volumes:
   postgres-data:

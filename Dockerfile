@@ -5,12 +5,19 @@ RUN go mod download
 COPY . .
 ENV GOTOOLCHAIN=local
 
+# The browser's callback runs on the laptop, not Docker's private loopback.
+# The helper is not copied into the API runtime image.
+FROM dev AS demo-build
+ARG CLIENT_OS
+ARG CLIENT_ARCH
+RUN CGO_ENABLED=0 GOOS=${CLIENT_OS} GOARCH=${CLIENT_ARCH} go build -trimpath -o /out/forgeapi-demo ./cmd/demo
+
 FROM dev AS build
-RUN CGO_ENABLED=0 go build -trimpath -o /out/forgeapi ./cmd/forgeapi && CGO_ENABLED=0 go build -trimpath -o /out/demo ./cmd/demo
+RUN CGO_ENABLED=0 go build -trimpath -o /out/forgeapi ./cmd/forgeapi
 
 FROM scratch AS runtime
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/forgeapi /forgeapi
-COPY --from=build /out/demo /demo
 USER 65532:65532
 ENTRYPOINT ["/forgeapi"]
 CMD ["api"]

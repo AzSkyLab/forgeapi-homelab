@@ -7,7 +7,8 @@ For each change, agree on one behavior, its acceptance example, owner, and exclu
 | Code | Owns |
 | --- | --- |
 | `internal/execution` | Portable input policy and public/domain types |
-| `internal/httpapi` | Routes, fixture identity boundary, HTTP errors and cursors |
+| `internal/httpapi` | Routes, current authorization, HTTP errors and cursors |
+| `internal/auth` | Entra verification/JWKS and bounded local grants; synthetic identities only in tests |
 | `internal/store` | PostgreSQL transactions, accepted responses and outbox |
 | `internal/orchestration` | Deterministic workflow decisions, dispatch and fake activities |
 | `internal/local`, `cmd` | Explicit local-only configuration and process entry points |
@@ -18,4 +19,4 @@ For concurrent engineers or writing sessions, use separate branches/worktrees an
 
 Before handoff, record changed behavior, commands/results, limitations and the next task in `docs/progress.md`. Keep original requirements/reviews intact. Changes that expand into cloud provisioning, live credentials, spending, deployment or persistent infrastructure capabilities need explicit scope approval.
 
-The local fixture identity header is not a security solution. No real data or credentials belong in fixtures, logs, tests or documentation. Enterprise authentication and the remaining M1 safety gates must be implemented and verified before any shared deployment.
+Entra is the only runtime authenticator; selectable identities exist only in automated tests. No real workload data or credentials belong in fixtures, logs, tests or documentation. Prefer browser PKCE for humans, managed identities for supported Azure workloads and WIF for trusted external workloads. No static Azure API key/client-secret fallback without explicit approval. Connected identity evidence and the remaining M1 safety gates are required before any shared deployment.

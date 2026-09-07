@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"forgeapi/internal/auth"
 	"forgeapi/internal/httpapi"
 	"forgeapi/internal/local"
 	"forgeapi/internal/orchestration"
@@ -46,6 +47,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	var authenticator auth.Authenticator
+	if os.Args[1] == "api" {
+		authenticator, err = auth.NewEntra(cfg.Entra)
+		if err != nil {
+			return err
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	dbCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -55,12 +63,12 @@ func run() error {
 		return errors.New("PostgreSQL unavailable; start the local dependencies and check DATABASE_URL")
 	}
 	defer s.Pool.Close()
-	slog.Warn("LOCAL DEMO ONLY: fixture identities; simulated compute; never expose or deploy this binary")
+	slog.Warn("LOCAL ONLY: simulated compute; never expose or deploy this binary", "auth_mode", cfg.AuthMode)
 	switch os.Args[1] {
 	case "migrate":
 		return s.Migrate(ctx)
 	case "api":
-		api := &httpapi.API{Repo: s, BaseURL: cfg.BaseURL, CursorKey: []byte(cfg.CursorKey)}
+		api := &httpapi.API{Repo: s, BaseURL: cfg.BaseURL, CursorKey: []byte(cfg.CursorKey), Auth: authenticator}
 		server := &http.Server{Addr: cfg.Listen, Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
 		go func() {
 			<-ctx.Done()

@@ -1,4 +1,9 @@
 /bin/
+/.local/
 /coverage.out
 /.env
+/.env.*
+!/.env.example
+!/.env.*.example
+/config/*.local.json
 *.test

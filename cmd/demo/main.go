@@ -12,6 +12,7 @@ import (
 	"forgeapi/internal/execution"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -21,27 +22,54 @@ const input = `{"application_id":"software-factory","environment":"development",
 
 type demo struct {
 	base   string
+	token  string
 	client http.Client
 	ctx    context.Context
 }
 
 func main() {
 	base := flag.String("url", "http://localhost:8080", "local API URL")
+	envFile := flag.String("env-file", ".env", "local Entra identifiers; never a client secret")
+	printURL := flag.Bool("print-login-url", false, "print the browser sign-in URL instead of opening it")
 	flag.Parse()
+	if !localAPIURL(*base) {
+		fmt.Fprintln(os.Stderr, "DEMO FAILED: URL must be a loopback HTTP origin")
+		os.Exit(1)
+	}
+	loginCtx, loginCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	token, err := signIn(loginCtx, *envFile, *printURL)
+	loginCancel()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "DEMO FAILED:", err)
+		os.Exit(1)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	d := demo{base: strings.TrimRight(*base, "/"), client: http.Client{Timeout: 5 * time.Second}, ctx: ctx}
+	d := demo{base: *base, token: token, client: http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, ctx: ctx}
 	if err := d.run(); err != nil {
 		fmt.Fprintln(os.Stderr, "DEMO FAILED:", err)
 		os.Exit(1)
 	}
+}
+
+func localAPIURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1") && u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == "" && !u.ForceQuery
 }
 func (d *demo) request(method, path, principal, key, body string, want int) ([]byte, error) {
 	r, err := http.NewRequestWithContext(d.ctx, method, d.base+path, strings.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	r.Header.Set("X-Demo-Principal", principal)
+	switch principal {
+	case "owner":
+		r.Header.Set("Authorization", "Bearer "+d.token)
+	case "fixture":
+		r.Header.Set("X-Demo-Principal", "alice")
+	case "missing":
+	default:
+		return nil, errors.New("unknown demonstration caller")
+	}
 	if key != "" {
 		r.Header.Set("Idempotency-Key", key)
 	}
@@ -58,7 +86,7 @@ func (d *demo) request(method, path, principal, key, body string, want int) ([]b
 		return nil, err
 	}
 	if resp.StatusCode != want {
-		return nil, fmt.Errorf("%s %s: wanted %d, got %d: %s", method, path, want, resp.StatusCode, b)
+		return nil, fmt.Errorf("%s %s: wanted %d, got %d (request ID %s); check auth configuration and grants", method, path, want, resp.StatusCode, resp.Header.Get("X-Request-ID"))
 	}
 	return b, nil
 }
@@ -67,7 +95,7 @@ func (d *demo) wait(id, want string) error {
 	defer ticker.Stop()
 	last := ""
 	for {
-		b, err := d.request("GET", "/executions/"+id, "alice", "", "", 200)
+		b, err := d.request("GET", "/executions/"+id, "owner", "", "", 200)
 		if err != nil {
 			return err
 		}
@@ -93,7 +121,7 @@ func (d *demo) wait(id, want string) error {
 	}
 }
 func (d *demo) submit(key, body string) (execution.Execution, []byte, error) {
-	b, err := d.request("POST", "/executions", "alice", key, body, 202)
+	b, err := d.request("POST", "/executions", "owner", key, body, 202)
 	var e execution.Execution
 	if err == nil {
 		err = json.Unmarshal(b, &e)
@@ -101,11 +129,11 @@ func (d *demo) submit(key, body string) (execution.Execution, []byte, error) {
 	return e, b, err
 }
 func (d *demo) run() error {
-	fmt.Println("ForgeAPI local demo — real API/PostgreSQL/Temporal; simulated compute and fixture identities.")
-	if _, err := d.request("GET", "/identity-context", "alice", "", "", 200); err != nil {
+	fmt.Println("ForgeAPI local demo — real Entra/API/PostgreSQL/Temporal; simulated compute.")
+	if _, err := d.request("GET", "/identity-context", "owner", "", "", 200); err != nil {
 		return err
 	}
-	if _, err := d.request("GET", "/execution-templates", "alice", "", "", 200); err != nil {
+	if _, err := d.request("GET", "/execution-templates", "owner", "", "", 200); err != nil {
 		return err
 	}
 	key := execution.ID("demo-")
@@ -114,7 +142,7 @@ func (d *demo) run() error {
 		return err
 	}
 	fmt.Println("1. Accepted durably:", e.ID, "— find this ID in Temporal UI http://localhost:8233")
-	replay, err := d.request("POST", "/execution-templates/pr-validation-v1/executions", "alice", key, input, 202)
+	replay, err := d.request("POST", "/execution-templates/pr-validation-v1/executions", "owner", key, input, 202)
 	if err != nil {
 		return err
 	}
@@ -122,21 +150,21 @@ func (d *demo) run() error {
 		return errors.New("idempotency replay changed the accepted response")
 	}
 	changed := strings.TrimSuffix(input, "}") + `,"timeout_seconds":60}`
-	if _, err = d.request("POST", "/executions", "alice", key, changed, 409); err != nil {
+	if _, err = d.request("POST", "/executions", "owner", key, changed, 409); err != nil {
 		return err
 	}
 	fmt.Println("2. Same key + same request = same execution; changed request = 409.")
-	if _, err = d.request("GET", "/executions/"+e.ID, "bob", "", "", 404); err != nil {
+	if _, err = d.request("GET", "/executions/"+e.ID, "missing", "", "", 401); err != nil {
 		return err
 	}
-	if _, err = d.request("GET", "/executions/"+e.ID+"/logs", "auditor", "", "", 403); err != nil {
+	if _, err = d.request("GET", "/executions/"+e.ID+"/logs", "fixture", "", "", 401); err != nil {
 		return err
 	}
-	fmt.Println("3. Bob cannot read Alice's job; auditor cannot read workload data (fixture policy).")
+	fmt.Println("3. Missing token and former demo-identity header are rejected (401). Cross-user/auditor isolation is covered separately by automated tests.")
 	if err = d.wait(e.ID, "succeeded"); err != nil {
 		return err
 	}
-	replay, err = d.request("POST", "/executions", "alice", key, input, 202)
+	replay, err = d.request("POST", "/executions", "owner", key, input, 202)
 	if err != nil {
 		return err
 	}
@@ -144,7 +172,7 @@ func (d *demo) run() error {
 		return errors.New("terminal replay changed the original response")
 	}
 	for _, kind := range []string{"events", "logs"} {
-		b, err := d.request("GET", "/executions/"+e.ID+"/"+kind, "alice", "", "", 200)
+		b, err := d.request("GET", "/executions/"+e.ID+"/"+kind, "owner", "", "", 200)
 		if err != nil {
 			return err
 		}
@@ -169,7 +197,7 @@ func (d *demo) run() error {
 			}
 		}
 	}
-	b, err := d.request("GET", "/executions/"+e.ID+"/results", "alice", "", "", 200)
+	b, err := d.request("GET", "/executions/"+e.ID+"/results", "owner", "", "", 200)
 	if err != nil {
 		return err
 	}
@@ -180,7 +208,7 @@ func (d *demo) run() error {
 	if !result.ResultComplete || len(result.Artifacts) != 1 {
 		return errors.New("missing completed result")
 	}
-	artifact, err := d.request("GET", "/executions/"+e.ID+"/artifacts/"+result.Artifacts[0].ID, "alice", "", "", 200)
+	artifact, err := d.request("GET", "/executions/"+e.ID+"/artifacts/"+result.Artifacts[0].ID, "owner", "", "", 200)
 	if err != nil {
 		return err
 	}
@@ -197,14 +225,14 @@ func (d *demo) run() error {
 		return err
 	}
 	cancelKey := execution.ID("cancel-")
-	cancelled, err := d.request("POST", "/executions/"+second.ID+"/cancellations", "alice", cancelKey, `{"reason":"operator_request"}`, 202)
+	cancelled, err := d.request("POST", "/executions/"+second.ID+"/cancellations", "owner", cancelKey, `{"reason":"operator_request"}`, 202)
 	if err != nil {
 		return err
 	}
 	if err = d.wait(second.ID, "cancelled"); err != nil {
 		return err
 	}
-	again, err := d.request("POST", "/executions/"+second.ID+"/cancellations", "alice", cancelKey, `{"reason":"operator_request"}`, 202)
+	again, err := d.request("POST", "/executions/"+second.ID+"/cancellations", "owner", cancelKey, `{"reason":"operator_request"}`, 202)
 	if err != nil {
 		return err
 	}

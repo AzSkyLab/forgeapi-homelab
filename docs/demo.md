@@ -1,63 +1,54 @@
-# Tomorrow's demo — about ten minutes
+# Meeting demo — about ten minutes
 
 ## Before the meeting
 
-Run the [README startup and tests](../README.md) once on the demonstration machine. Initial image/module downloads require approved network access. Use synthetic data only. Docker Desktop or an approved compatible runtime must support Linux containers and Compose. Ports 8080, 54329, 7233 and 8233 must be free.
+Complete [Entra setup](entra-local.md) for the approved tenant and each engineer's local grant. Start Docker Desktop on the Mac, then rehearse **`sh scripts/verify-local.sh`**. This runs tests, starts the real local dependencies, and opens browser sign-in. First builds need network access; live sign-in needs Entra. No host Go or client secret is required.
 
-The work demonstration will use a Mac. Follow the [Mac setup note](../README.md#on-your-work-mac), start Docker Desktop, and rehearse startup, demo and tests on that machine. The same commands apply to Intel and Apple silicon; no host Go installation is required for this walkthrough.
+Normal startup is Entra-only. There is no offline fixture-auth API to switch to if consent fails. Unit/HTTP/workflow/database tests remain credentials-free.
 
 ## 1. Explain the shape — one minute
 
-Open [TLDR](TLDR.md). Say: “We are building the API first. The database and workflow engine are real; compute is simulated. We can develop and test without provisioning Azure infrastructure.”
+Open [TLDR](TLDR.md). Say: “We are building the API first. Entra authenticates us. The database and workflow engine are real; compute is simulated. We can develop without provisioning Azure hosting.”
 
 ## 2. Show the running system — three minutes
 
 ```sh
 docker compose up --build -d --wait
 docker compose ps
-docker compose run --rm demo
+sh scripts/demo.sh
 ```
 
-Open <http://localhost:8233>. Search for the execution ID printed by the demo. Show workflow history: activities, timers, completion and cancellation. The executable checks real HTTP responses and prints `PASS` only after its assertions succeed.
+Sign in with your own granted account. The helper sends an API access token from process memory, not from a pasted command or secret. It checks authenticated submission, idempotency replay/conflict, lifecycle, events/logs, artifact integrity, cancellation and timeout. It also proves missing-token and former demo-header requests fail. Cross-user/auditor isolation is covered by automated tests; a one-user walkthrough is not a two-user connected test.
 
-For a manual API request (POSIX shell; in PowerShell use `curl.exe` with suitable quoting):
+Open <http://localhost:8233>. Search for the execution ID printed by the demo. Show activities, timers and completion. `PASS` is printed only after the walkthrough assertions succeed. Artifacts and workload logs are explicitly synthetic.
+
+A safe manual denial demonstration (no token needed):
 
 ```sh
-curl -i http://localhost:8080/executions \
-  -H 'X-Demo-Principal: alice' \
-  -H 'Content-Type: application/json' \
-  -H 'Idempotency-Key: meeting-demo-0001' \
-  -d '{"application_id":"software-factory","environment":"development","template_id":"pr-validation-v1","template_version":"1.0.0","input_artifact_refs":["source-01"]}'
+curl -i http://localhost:8080/identity-context
+curl -i http://localhost:8080/identity-context -H 'X-Demo-Principal: alice'
 ```
 
-Copy the returned ID into `/executions/ID`, `/events`, `/logs` or `/results`, with the same identity header. Repeat the POST to show the same original acceptance. Change a field with the same key to show `409`. Use a fresh key when you want a new job.
+Both should return **401**. Never paste a real bearer token into meeting notes, a terminal recording or chat.
 
 ## 3. Show how tests guide development — three minutes
 
 ```sh
-docker compose run --build --rm --no-deps tests go test -count=1 -v ./internal/execution -run TestResolveTemplate
-docker compose run --rm --no-deps tests go test -count=1 -v ./internal/orchestration -run TestWorkflow
-docker compose run --rm --no-deps tests
+docker compose -f compose.test.yaml run --build --rm --no-deps tests go test -count=1 -v ./internal/auth -run TestEntraTokenValidation
+docker compose -f compose.test.yaml run --rm --no-deps tests go test -count=1 -v ./internal/httpapi -run TestEntraHTTPAuthorization
+docker compose -f compose.test.yaml run --rm --no-deps tests
 ```
 
-Open `internal/execution/input_test.go` beside `input.go`. Explain the table: valid input passes; missing fields, unauthorized overrides, duplicate JSON keys and invalid timeouts are rejected. Workflow tests advance a virtual clock, so they don't need a live Temporal server or fixed sleeps. HTTP tests call the actual router using Go's `httptest`.
+Open `internal/auth/entra_test.go`: forged, expired, wrong-tenant/audience/client and ID tokens are denied. Then `internal/httpapi/entra_test.go`: the actual verifier/router enforce ownership and current grants, including after revocation with an old cursor/ETag. Synthetic signing keys keep this deterministic; they are not accepted by the running API.
 
-Show the co-development loop without making a throwaway change during the meeting: choose a behavior → add its failing test → implement → run checks → human review. A good next task is implementing bounded event long-polling, which this increment explicitly rejects.
+Input tests exercise strict request validation. Temporal tests advance a virtual clock without a server or fixed sleeps. `make test-integration` exercises transactions and concurrency in a separate ephemeral PostgreSQL database.
 
-## 4. Show local recovery — optional two minutes
+## 4. Show the co-development loop — two minutes
 
-```sh
-docker compose stop worker
-# Submit a NEW manual request with a fresh Idempotency-Key.
-# Its status remains accepted; its dispatch intent is in PostgreSQL.
-docker compose restart api
-docker compose start worker
-```
-
-Poll that execution: it should progress. Repeating its original request/key still returns the original acceptance. This demonstrates a specific local recovery case, not complete disaster-recovery coverage. Keep both named volumes; do not erase them.
+Open [handoff](handoff.md). Choose one behavior → add its failing test → implement → run checks → human review. Each session gets an exact code map and bounded task, not a mandate to reread the design folder. After connected identity evidence, a suitable next slice is bounded event long-polling.
 
 ## 5. Close with the roadmap — one minute
 
-“Next we finish the core API and enterprise identity/recovery tests. Then we add shared Azure hosting and the real compute provider. Persistent infrastructure operations follow as another API capability.”
+“Next we finish core semantics, authorization/recovery, telemetry and CI. Then we add reviewed shared Azure hosting and a real compute provider. Azure services should use managed identities; external workloads should use WIF. Infrastructure operations through the API come later.”
 
-If the stack fails, inspect `docker compose logs --tail=100 postgres temporal migrate api worker`. Do not present a successful build or simulated workload log as proof that real cloud execution works.
+If startup/sign-in fails, inspect sanitized API logs and the browser's Entra error. Do not turn off authentication or claim a successful unit suite proves connected sign-in. Keep the application's named volumes; see README for shutdown. The Temporal UI and local database remain development interfaces, not Entra-protected endpoints.

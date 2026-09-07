@@ -1,7 +1,8 @@
 GO ?= go
 COMPOSE ?= docker compose
+TEST_COMPOSE = $(COMPOSE) -f compose.test.yaml
 
-.PHONY: up down deps run-api run-worker migrate demo test test-verbose test-docker test-integration check fmt fmt-check
+.PHONY: up down deps run-api run-worker migrate demo verify-local test test-verbose test-docker test-integration check fmt fmt-check
 up:
 	$(COMPOSE) up --build -d --wait
 down:
@@ -15,16 +16,18 @@ run-worker:
 migrate:
 	FORGE_MODE=local-demo $(GO) run ./cmd/forgeapi migrate
 demo:
-	$(COMPOSE) run --rm demo
+	sh scripts/demo.sh
+verify-local:
+	sh scripts/verify-local.sh
 test:
 	$(GO) test ./...
 test-verbose:
 	$(GO) test -count=1 -v ./...
 test-docker:
-	$(COMPOSE) run --build --rm --no-deps tests
+	$(TEST_COMPOSE) run --build --rm --no-deps tests
 test-integration:
-	$(COMPOSE) up -d --wait postgres
-	$(COMPOSE) run --build --rm --no-deps -e 'FORGE_TEST_DATABASE_URL=postgres://forge:local-fixture-only@postgres:5432/forge?sslmode=disable' tests go test -race -count=1 -v -tags=integration ./internal/store
+	$(TEST_COMPOSE) up -d --wait postgres
+	$(TEST_COMPOSE) run --build --rm --no-deps -e 'FORGE_TEST_DATABASE_URL=postgres://forge:test-fixture-only@postgres:5432/forge?sslmode=disable' tests go test -race -count=1 -v -tags=integration ./internal/store
 check: fmt-check
 	$(GO) vet ./...
 	$(GO) test -race -count=1 ./...
