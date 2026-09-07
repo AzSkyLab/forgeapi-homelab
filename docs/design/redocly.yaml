@@ -1,0 +1,9 @@
+# Executable local documentation profile: platform-api-design/0.1.0.
+# Enterprise Zalando rules remain V01; these two exceptions describe M0 placeholders.
+extends:
+  - recommended
+rules:
+  struct: error
+  no-invalid-media-type-examples: error
+  info-license: off # No publication license has been granted for this internal design.
+  no-server-example.com: off # Documentation host; there is no deployed API yet.

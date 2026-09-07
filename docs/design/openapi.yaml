@@ -1,0 +1,889 @@
+openapi: 3.1.1
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: Infrastructure Platform Execution API
+  version: 0.2.0
+  description: >-
+    M0 design sketch; no endpoint is implemented or approved. M1 exercises the
+    fake provider; M3 supplies the selected live provider. Only API-audience Entra
+    access tokens are accepted. Object/data authorization is enforced on every
+    read and cancellation. All operations accept validated X-Flow-ID and W3C
+    trace context and return server X-Request-ID and X-Flow-ID headers; neither
+    grants authority. Local conventions await enterprise review V01.
+  contact:
+    name: Platform engineering owners (assignment pending)
+  x-api-id: infrastructure-platform-execution
+  x-audience: company-internal
+x-design-status: proposed
+x-internal-lint-profile: platform-api-design/0.1.0
+servers:
+  - url: https://platform.example.com
+    description: Documentation placeholder; not a deployed service.
+security:
+  - EntraBearer: []
+tags:
+  - name: Identity
+    description: Authenticated caller context.
+  - name: Templates
+    description: Governed immutable execution templates.
+  - name: Executions
+    description: Durable execution intent, observations and authorized results.
+paths:
+  /identity-context:
+    get:
+      operationId: getIdentityContext
+      tags: [Identity]
+      summary: Read the caller's authorized application/environment context
+      parameters:
+        - { $ref: '#/components/parameters/FlowId' }
+        - { $ref: '#/components/parameters/Traceparent' }
+        - { $ref: '#/components/parameters/Tracestate' }
+      responses:
+        '200':
+          description: Caller context only; grants are evaluated again on each operation.
+          headers:
+            X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              example: {"principal_id":"principal-example01","principal_kind":"human","authorized_contexts":[{"application_id":"software-factory","environment":"development","permissions":["execution.submit","execution.read","execution.cancel","execution.data.read","catalog.read"]}]}
+              schema: { $ref: '#/components/schemas/IdentityContext' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/RetryableProblem' }
+        '503': { $ref: '#/components/responses/RetryableProblem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /execution-templates:
+    get:
+      operationId: listExecutionTemplates
+      security:
+        - EntraBearer: [catalog.read]
+      x-required-permissions: [catalog.read]
+      tags: [Templates]
+      summary: List authorized immutable execution-template versions
+      description: Authorization filtering precedes pagination; no global count is returned.
+      parameters:
+        - { $ref: '#/components/parameters/FlowId' }
+        - { $ref: '#/components/parameters/Traceparent' }
+        - { $ref: '#/components/parameters/Tracestate' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Authorized template page.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+            X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              example: {"items":[{"template_id":"pr-validation-v1","version":"1.0.0","description":"Source tests against a supervisor-started pinned helper service; emits named sbom. Command is derived from the single input reference.","allowed_overrides":["compute_profile","timeout_seconds"],"input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["application_id","environment","template_id","template_version","input_artifact_refs"],"properties":{"template_id":{"const":"pr-validation-v1"},"template_version":{"const":"1.0.0"},"compute_profile":{"enum":["general-medium"]},"timeout_seconds":{"type":"integer","minimum":1,"maximum":1800},"input_artifact_refs":{"type":"array","minItems":1,"maxItems":1,"items":{"type":"string"}},"image":{"const":"registry.example.com/software-factory/reviewer@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"execution_class":{"const":"isolated-vm"},"placement_policy":{"const":"us-data-residency"},"network_profile":{"const":"software-factory-restricted"},"environment_variables":{"const":{"RUN_MODE":"pull-request"}},"secret_refs":{"const":[]}},"description":"Template-specific constraints apply with the closed structural ExecutionInput schema and server-derived command binding; these annotations do not execute expansion."},"defaults":{"image":"registry.example.com/software-factory/reviewer@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","compute_profile":"general-medium","execution_class":"isolated-vm","placement_policy":"us-data-residency","network_profile":"software-factory-restricted","timeout_seconds":1800,"environment_variables":{"RUN_MODE":"pull-request"},"secret_refs":[]},"revoked":false}],"page":{}}
+              schema:
+                type: object
+                required: [items, page]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 200
+                    items: { $ref: '#/components/schemas/ExecutionTemplate' }
+                  page: { $ref: '#/components/schemas/Page' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/RetryableProblem' }
+        '503': { $ref: '#/components/responses/RetryableProblem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /executions:
+    post:
+      operationId: createExecution
+      security:
+        - EntraBearer: [execution.submit]
+      tags: [Executions]
+      summary: Durably admit one template-bound execution
+      description: >-
+        Requires execution.submit on the registered application/environment.
+        All fields are governed by the selected immutable template. Ownership,
+        targets, profile versions and identities are resolved by the server.
+        Identical authorized retries return the original 202 and Location.
+        Payload conflicts return 409. Acceptance does not mean compute started.
+      x-required-permissions: [execution.submit]
+      parameters:
+        - { $ref: '#/components/parameters/Traceparent' }
+        - { $ref: '#/components/parameters/Tracestate' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/FlowId' }
+      requestBody: { $ref: '#/components/requestBodies/ExecutionInput' }
+      responses:
+        '202': { $ref: '#/components/responses/ExecutionAccepted' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '415': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/RetryableProblem' }
+        '503': { $ref: '#/components/responses/RetryableProblem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '410': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /execution-templates/{template_id}/executions:
+    parameters:
+      - name: template_id
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/LogicalId' }
+    post:
+      operationId: createTemplateExecution
+      security:
+        - EntraBearer: [execution.submit]
+      tags: [Templates, Executions]
+      summary: Submit through a template-scoped route
+      description: >-
+        Identical to POST /executions. Body template_id must match the path.
+        Both routes normalize to the same submission operation for idempotency.
+      x-required-permissions: [execution.submit]
+      parameters:
+        - { $ref: '#/components/parameters/Traceparent' }
+        - { $ref: '#/components/parameters/Tracestate' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/FlowId' }
+      requestBody: { $ref: '#/components/requestBodies/ExecutionInput' }
+      responses:
+        '202': { $ref: '#/components/responses/ExecutionAccepted' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/RetryableProblem' }
+        '503': { $ref: '#/components/responses/RetryableProblem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '410': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '415': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /executions/{execution_id}:
+    parameters:
+      - { $ref: '#/components/parameters/ExecutionId' }
+    get:
+      operationId: getExecution
+      security:
+        - EntraBearer: [execution.read]
+      tags: [Executions]
+      summary: Read execution status and independent cleanup/delivery outcomes
+      x-required-permissions: [execution.read]
+      parameters:
+        - { $ref: '#/components/parameters/FlowId' }
+        - { $ref: '#/components/parameters/Traceparent' }
+        - { $ref: '#/components/parameters/Tracestate' }
+        - name: If-None-Match
+          in: header
+          schema: { type: string, maxLength: 128 }
+      responses:
+        '200':
+          description: Current authorized projection; provider identifiers are never exposed.
+          headers:
+            X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+            ETag: { $ref: '#/components/headers/ETag' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              example: {"id":"exec_example01","application_id":"software-factory","environment":"development","template_id":"pr-validation-v1","template_version":"1.0.0","state":"succeeded","cleanup_state":"succeeded","delivery_status":"complete","infrastructure_status":"absent","dispatch_status":"started","result_complete":true,"revision":12,"created_at":"2026-09-05T18:00:00Z","deadline_at":"2026-09-05T18:30:00Z","started_at":"2026-09-05T18:01:00Z","observed_at":"2026-09-05T18:02:00Z","completed_at":"2026-09-05T18:01:45Z","links":{"self":"https://platform.example.com/executions/exec_example01","events":"https://platform.example.com/executions/exec_example01/events","logs":"https://platform.example.com/executions/exec_example01/logs","results":"https://platform.example.com/executions/exec_example01/results"}}
+              schema: { $ref: '#/components/schemas/Execution' }
+        '304':
+          description: Unchanged after current object authorization.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+            X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+            ETag: { $ref: '#/components/headers/ETag' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/RetryableProblem' }
+        '503': { $ref: '#/components/responses/RetryableProblem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /executions/{execution_id}/cancellations:
+    parameters:
+      - { $ref: '#/components/parameters/ExecutionId' }
+    post:
+      operationId: requestExecutionCancellation
+      security:
+        - EntraBearer: [execution.cancel]
+      tags: [Executions]
+      summary: Record an eventual stop request
+      description: >-
+        Requires current cancellation authority. No rollback/removal guarantee.
+        The execution may complete before the stop request takes effect.
+        New intents on terminal executions return 409; idempotent retries replay
+        the original response. A cancellation resource does not require If-Match.
+      x-required-permissions: [execution.cancel]
+      parameters:
+        - { $ref: '#/components/parameters/Traceparent' }
+        - { $ref: '#/components/parameters/Tracestate' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/FlowId' }
+      requestBody:
+        required: false
+        description: An absent body normalizes to an empty object for idempotency.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason:
+                  type: string
+                  enum: [no_longer_needed, superseded_by_new_request, operator_request]
+            example: { reason: no_longer_needed }
+      responses:
+        '202':
+          description: Durable intent; Location is the execution status resource.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+            X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+            Location: { $ref: '#/components/headers/Location' }
+            Retry-After: { $ref: '#/components/headers/RetryAfter' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              example: {"id":"cancel-example01","execution_id":"exec_example01","status":"requested","requested_at":"2026-09-05T18:01:00Z","deadline_at":"2026-09-05T18:03:00Z","reason":"no_longer_needed"}
+              schema: { $ref: '#/components/schemas/Cancellation' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '410': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '415': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/RetryableProblem' }
+        '503': { $ref: '#/components/responses/RetryableProblem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /executions/{execution_id}/events:
+    parameters:
+      - { $ref: '#/components/parameters/ExecutionId' }
+    get:
+      operationId: getExecutionEvents
+      security:
+        - EntraBearer: [execution.read]
+      tags: [Executions]
+      summary: Poll ordered execution events with an optional bounded wait
+      description: >-
+        Reauthorize before returning after a wait. Empty timeout is 200 with no
+        items and the same cursor. Events are deduplicated by execution/sequence.
+        Expired cursor returns 410. Disconnect does not cancel the execution.
+      x-required-permissions: [execution.read]
+      parameters:
+        - { $ref: '#/components/parameters/FlowId' }
+        - { $ref: '#/components/parameters/Traceparent' }
+        - { $ref: '#/components/parameters/Tracestate' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - name: wait_seconds
+          in: query
+          schema: { type: integer, format: int32, minimum: 0, maximum: 25, default: 0 }
+      responses:
+        '200':
+          description: Authorized events in ascending sequence order.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+            X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              example: {"items":[{"id":"event-example12","execution_id":"exec_example01","sequence":12,"event_type":"execution.cleanup_changed","recorded_at":"2026-09-05T18:02:01Z","observed_at":"2026-09-05T18:02:00Z","revision":12,"state":"succeeded","cleanup_state":"succeeded","delivery_status":"complete","infrastructure_status":"absent","dispatch_status":"started","result_complete":true}],"cursor":"opaque-event-cursor-12","page":{}}
+              schema:
+                type: object
+                required: [items, cursor, page]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 200
+                    items: { $ref: '#/components/schemas/ExecutionEvent' }
+                  cursor: { type: string, maxLength: 2048 }
+                  page: { $ref: '#/components/schemas/Page' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '410': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/RetryableProblem' }
+        '503': { $ref: '#/components/responses/RetryableProblem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /executions/{execution_id}/logs:
+    parameters:
+      - { $ref: '#/components/parameters/ExecutionId' }
+    get:
+      operationId: getExecutionLogs
+      security:
+        - EntraBearer: [execution.read, execution.data.read]
+      tags: [Executions]
+      summary: Read bounded sanitized log pages
+      description: >-
+        Requires object and classification-specific data-read authority. At most
+        256 KiB per page; sanitized content only. Pagination does not grant access.
+      x-required-permissions: [execution.read, execution.data.read]
+      parameters:
+        - { $ref: '#/components/parameters/FlowId' }
+        - { $ref: '#/components/parameters/Traceparent' }
+        - { $ref: '#/components/parameters/Tracestate' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Published log entries; empty while none are available.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+            X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              example: {"items":[{"sequence":1,"stream":"stdout","source":"workload","recorded_at":"2026-09-05T18:01:44Z","text":"2 tests passed"}],"cursor":"opaque-log-cursor-1","page":{},"truncated":false}
+              schema:
+                type: object
+                required: [items, cursor, page, truncated]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 200
+                    items:
+                      type: object
+                      required: [sequence, stream, source, recorded_at, text]
+                      properties:
+                        sequence: { type: integer, format: int64, minimum: 1 }
+                        stream: { type: string, examples: [stdout, stderr] }
+                        source: { type: string, maxLength: 64, examples: [workload, helper, supervisor] }
+                        recorded_at: { type: string, format: date-time }
+                        observed_at: { type: string, format: date-time }
+                        text: { type: string, maxLength: 16384 }
+                  page: { $ref: '#/components/schemas/Page' }
+                  cursor: { type: string, maxLength: 2048, description: Resume after returned entries; unchanged for empty page even without page.next. }
+                  truncated: { type: boolean, description: Content omitted by a limit or redaction policy; not a has-more-pages flag. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '410': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/RetryableProblem' }
+        '503': { $ref: '#/components/responses/RetryableProblem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /executions/{execution_id}/results:
+    parameters:
+      - { $ref: '#/components/parameters/ExecutionId' }
+    get:
+      operationId: getExecutionResults
+      security:
+        - EntraBearer: [execution.read, execution.data.read]
+      tags: [Executions]
+      summary: Read portable result and artifact metadata
+      x-required-permissions: [execution.read, execution.data.read]
+      parameters:
+        - { $ref: '#/components/parameters/FlowId' }
+        - { $ref: '#/components/parameters/Traceparent' }
+        - { $ref: '#/components/parameters/Tracestate' }
+      responses:
+        '200':
+          description: Result representation also exists while delivery is pending.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+            X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              example: {"execution_id":"exec_example01","exit_code":0,"delivery_status":"complete","result_complete":true,"artifacts":[{"id":"artifact-sbom-01","name":"sbom","digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size_bytes":128,"media_type":"application/spdx+json","download_url":"https://platform.example.com/executions/exec_example01/artifacts/artifact-sbom-01","expires_at":"2026-09-12T18:00:00Z"}]}
+              schema: { $ref: '#/components/schemas/ExecutionResult' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/RetryableProblem' }
+        '503': { $ref: '#/components/responses/RetryableProblem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /executions/{execution_id}/artifacts/{artifact_id}:
+    parameters:
+      - { $ref: '#/components/parameters/ExecutionId' }
+      - name: artifact_id
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/LogicalId' }
+    get:
+      operationId: downloadExecutionArtifact
+      security:
+        - EntraBearer: [execution.read, execution.data.read]
+      tags: [Executions]
+      summary: Download an authorized immutable output artifact
+      description: >-
+        The artifact must belong to the execution and be published, retained,
+        and readable at its classification. Stream bytes through the API using
+        bounded transfer and safe attachment handling; no storage URL or credential
+        is returned. Range requests are not supported in the initial sketch.
+      x-required-permissions: [execution.read, execution.data.read]
+      parameters:
+        - { $ref: '#/components/parameters/FlowId' }
+        - { $ref: '#/components/parameters/Traceparent' }
+        - { $ref: '#/components/parameters/Tracestate' }
+      responses:
+        '200':
+          description: Immutable bytes; compare with the authorized manifest's digest.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/RequestId' }
+            X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+            Content-Length:
+              description: Verified manifest byte length for the complete object.
+              schema: { type: integer, format: int64, minimum: 0 }
+            Accept-Ranges:
+              description: Initial API streams complete objects; byte ranges are unsupported.
+              schema: { type: string, const: none }
+            Content-Disposition:
+              description: Safe generated attachment filename, never a caller-controlled path.
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '410': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/RetryableProblem' }
+        '503': { $ref: '#/components/responses/RetryableProblem' }
+        default: { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    EntraBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Entra access token for this API; verify configured tenant/issuer/audience,
+        signature and time claims. Humans use delegated permissions obtained by
+        authorization code with PKCE; CI uses federated app identity and app roles.
+        ID tokens and management tokens are not accepted. OAuth endpoints and
+        exact scopes/roles are tenant-registration decisions V02, not placeholders
+        for a new token issuer. Operation permission extensions supplement this
+        transport scheme; application/object grants are mandatory. Per-operation
+        security arrays list required registry permission roles (OpenAPI 3.1),
+        not substitutes for tenant-issued scopes or app roles.
+  parameters:
+    ExecutionId:
+      name: execution_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ExecutionId' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >-
+        Scoped to tenant/principal/authorized app/environment/operation/parent.
+        Same canonical caller payload replays original 202; changed payload yields 409.
+        Omitted and explicit defaults are different caller payloads. Only accepted
+        202 mappings are retained; denials and transient errors are reevaluated.
+        Retained at least 90 days after terminal and resolved cleanup, indefinitely
+        while active/uncertain. Reuse after expiry creates new work.
+      schema: { type: string, pattern: '^[A-Za-z0-9_-]{16,128}$' }
+    FlowId:
+      name: X-Flow-ID
+      in: header
+      required: false
+      description: Untrusted correlation only; validate or generate when absent. Not an execution ID or credential.
+      schema: { type: string, pattern: '^[a-zA-Z0-9/+_=\-]{1,128}$' }
+    Traceparent:
+      name: traceparent
+      in: header
+      description: Validated W3C trace context; untrusted correlation only.
+      schema: { type: string, maxLength: 512 }
+    Tracestate:
+      name: tracestate
+      in: header
+      description: Allowlisted W3C trace state; never authorization or arbitrary baggage.
+      schema: { type: string, maxLength: 512 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor bound to resource, scope, ordering and expiry; always reauthorize.
+      schema: { type: string, maxLength: 2048 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, format: int32, minimum: 1, maximum: 200, default: 50 }
+  headers:
+    X-Request-ID: { $ref: '#/components/headers/RequestId' }
+    X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+    Location:
+      description: Absolute same-origin execution status URL.
+      schema: { type: string, format: uri }
+    RequestId:
+      description: Server-generated request correlation ID.
+      schema: { type: string, maxLength: 128 }
+    FlowId:
+      description: Validated or server-generated flow correlation ID.
+      schema: { type: string, maxLength: 128 }
+    RetryAfter:
+      description: Suggested delay in seconds; does not guarantee readiness.
+      schema: { type: integer, format: int32, minimum: 1 }
+    ETag:
+      description: Quoted opaque projection revision.
+      schema: { type: string, examples: ['"1"'] }
+    NoStore:
+      description: Authenticated responses are not shared-cacheable.
+      schema: { type: string, const: no-store }
+  requestBodies:
+    ExecutionInput:
+      required: true
+      description: >-
+        Maximum body 64 KiB. Reject duplicate JSON keys and unknown fields.
+        Template policy narrows the structural schema. Example image/IDs are
+        synthetic documentation fixtures, not an approved catalog.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ExecutionInput' }
+          example:
+            application_id: software-factory
+            environment: development
+            template_id: pr-validation-v1
+            template_version: 1.0.0
+            image: registry.example.com/software-factory/reviewer@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            command: [review, --source-ref, 'artifact:source-01']
+            compute_profile: general-medium
+            execution_class: isolated-vm
+            placement_policy: us-data-residency
+            network_profile: software-factory-restricted
+            timeout_seconds: 1800
+            environment_variables: { RUN_MODE: pull-request }
+            secret_refs: []
+            input_artifact_refs: [source-01]
+  responses:
+    ExecutionAccepted:
+      description: Durable admission; workflow/provider dispatch may still be pending.
+      headers:
+        Location: { $ref: '#/components/headers/Location' }
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+        X-Request-ID: { $ref: '#/components/headers/RequestId' }
+        X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+        ETag: { $ref: '#/components/headers/ETag' }
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Execution' }
+          example:
+            id: exec_example01
+            application_id: software-factory
+            environment: development
+            template_id: pr-validation-v1
+            template_version: 1.0.0
+            state: accepted
+            cleanup_state: pending
+            delivery_status: pending
+            infrastructure_status: not_allocated
+            dispatch_status: pending
+            result_complete: false
+            revision: 1
+            created_at: '2026-09-05T18:00:00Z'
+            deadline_at: '2026-09-05T18:30:00Z'
+            links:
+              self: https://platform.example.com/executions/exec_example01
+              events: https://platform.example.com/executions/exec_example01/events
+              logs: https://platform.example.com/executions/exec_example01/logs
+              results: https://platform.example.com/executions/exec_example01/results
+    Problem:
+      description: >-
+        Sanitized problem; never a cloud diagnostic. Status/code semantics are in
+        04-api.md. 400 invalid input, 403 denied operation, 404 missing or forbidden
+        object, 406 unacceptable representation, 409 conflict, 410 expired cursor
+        or object, 413 size, 415 media type, 429 rate limit, 503 unavailable.
+        Workload failures after admission appear in execution/results instead.
+      headers:
+        X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+        X-Request-ID: { $ref: '#/components/headers/RequestId' }
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: https://platform.example.com/problems/invalid_execution
+            title: Invalid execution
+            status: 400
+            detail: The request does not satisfy the selected template.
+            instance: https://platform.example.com/requests/req_example01
+            code: invalid_execution
+            request_id: req_example01
+    Unauthenticated:
+      description: Missing or invalid API-audience token.
+      headers:
+        X-Request-ID: { $ref: '#/components/headers/RequestId' }
+        X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+        WWW-Authenticate:
+          schema: { type: string, examples: ['Bearer realm="platform"'] }
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    RetryableProblem:
+      description: Admission throttled or service temporarily unavailable; retry with the same idempotency key.
+      headers:
+        X-Flow-ID: { $ref: '#/components/headers/FlowId' }
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+        X-Request-ID: { $ref: '#/components/headers/RequestId' }
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    LogicalId:
+      type: string
+      pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+    ExecutionId:
+      type: string
+      pattern: '^exec_[a-z0-9]{8,48}$'
+    Version:
+      type: string
+      pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    Digest:
+      type: string
+      pattern: '^sha256:[a-f0-9]{64}$'
+    ExecutionInput:
+      description: Five caller fields are required; immutable templates expand omitted governed settings before admission. Fixed fields may be echoed but not changed; null is not omission.
+      type: object
+      additionalProperties: false
+      required:
+        - application_id
+        - environment
+        - template_id
+        - template_version
+        - input_artifact_refs
+      properties:
+        application_id: { $ref: '#/components/schemas/LogicalId' }
+        environment: { $ref: '#/components/schemas/LogicalId' }
+        template_id: { $ref: '#/components/schemas/LogicalId' }
+        template_version: { $ref: '#/components/schemas/Version' }
+        image:
+          type: string
+          maxLength: 512
+          pattern: '^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$'
+          description: Approved registry/repository digest, exactly allowed by template. No credentials or mutable tags.
+        command:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items: { type: string, minLength: 1, maxLength: 512 }
+          description: Template-constrained argument vector, not arbitrary shell or secret delivery.
+        compute_profile: { $ref: '#/components/schemas/LogicalId' }
+        execution_class: { type: string, enum: [isolated-vm] }
+        placement_policy: { $ref: '#/components/schemas/LogicalId' }
+        network_profile: { $ref: '#/components/schemas/LogicalId' }
+        timeout_seconds:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 86400
+          description: Structural ceiling only; template/profile sets a lower maximum. Includes queue/allocation from acceptance.
+        environment_variables:
+          type: object
+          maxProperties: 32
+          propertyNames: { pattern: '^[A-Z][A-Z0-9_]{0,63}$' }
+          additionalProperties: { type: string, maxLength: 1024 }
+          description: Nonsecret values; keys and values must satisfy template allowlist.
+        secret_refs:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/LogicalId' }
+          description: Governed policies, never values or cloud vault locators. Demo template requires empty list.
+        input_artifact_refs:
+          type: array
+          minItems: 1
+          maxItems: 16
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/LogicalId' }
+          description: Registry-bound immutable artifacts with current ownership/data authorization.
+    Execution:
+      type: object
+      required: [id, application_id, environment, template_id, template_version, state, cleanup_state, delivery_status, infrastructure_status, dispatch_status, result_complete, revision, created_at, deadline_at, links]
+      properties:
+        id: { $ref: '#/components/schemas/ExecutionId' }
+        application_id: { $ref: '#/components/schemas/LogicalId' }
+        environment: { $ref: '#/components/schemas/LogicalId' }
+        template_id: { $ref: '#/components/schemas/LogicalId' }
+        template_version: { $ref: '#/components/schemas/Version' }
+        state:
+          type: string
+          examples: [accepted, provisioning, starting, running, succeeded, failed, cancelled, timed_out]
+          description: Current outcomes are defined in 03-domain.md. Clients tolerate future output values.
+        cleanup_state: { type: string, examples: [pending, running, succeeded, failed] }
+        delivery_status: { type: string, examples: [pending, complete, partial, failed] }
+        infrastructure_status: { type: string, examples: [not_allocated, present, unknown, absent] }
+        dispatch_status: { type: string, examples: [pending, started, attention_required] }
+        result_complete: { type: boolean, description: All template-required result fields and named artifacts are verified and published; independent of exit and cleanup. }
+        revision: { type: integer, format: int64, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        deadline_at: { type: string, format: date-time }
+        observed_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time, description: Observed container start only; absent if not observed. }
+        timed_out_from: { type: string, examples: [accepted, provisioning, starting, running] }
+        completed_at: { type: string, format: date-time }
+        error: { $ref: '#/components/schemas/ExecutionError' }
+        cleanup_error: { $ref: '#/components/schemas/ExecutionError' }
+        delivery_error: { $ref: '#/components/schemas/ExecutionError' }
+        cancellation: { $ref: '#/components/schemas/Cancellation' }
+        links:
+          type: object
+          required: [self, events, logs, results]
+          properties:
+            self: { type: string, format: uri }
+            events: { type: string, format: uri }
+            logs: { type: string, format: uri }
+            results: { type: string, format: uri }
+    ExecutionError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          examples: [invalid_execution, policy_denied, capacity_unavailable, provisioning_failed, image_unavailable, workload_failed, execution_timed_out, cancellation_failed, cleanup_failed, provider_unavailable]
+        message: { type: string, maxLength: 512, description: Sanitized portable explanation. }
+        origin: { type: string, examples: [platform, provider, workload], description: Platform failure does not assert an observed workload exit. }
+    Cancellation:
+      type: object
+      required: [id, execution_id, status, requested_at, deadline_at]
+      properties:
+        id: { $ref: '#/components/schemas/LogicalId' }
+        execution_id: { $ref: '#/components/schemas/ExecutionId' }
+        status: { type: string, examples: [requested, acknowledged, superseded, failed] }
+        requested_at: { type: string, format: date-time }
+        deadline_at: { type: string, format: date-time, description: Bounded cancellation attempt deadline; not proof of stop. }
+        reason: { type: string, examples: [no_longer_needed, superseded_by_new_request, operator_request] }
+        error: { $ref: '#/components/schemas/ExecutionError' }
+    ExecutionEvent:
+      type: object
+      required: [id, execution_id, sequence, event_type, recorded_at, revision, state, cleanup_state, delivery_status, infrastructure_status, dispatch_status, result_complete]
+      properties:
+        id: { $ref: '#/components/schemas/LogicalId' }
+        execution_id: { $ref: '#/components/schemas/ExecutionId' }
+        sequence: { type: integer, format: int64, minimum: 1 }
+        event_type:
+          type: string
+          maxLength: 128
+          examples: [execution.accepted, execution.state_changed, execution.stage_observed, execution.dispatch_changed, execution.infrastructure_changed, execution.delivery_changed, execution.cleanup_changed, execution.cancellation_changed, execution.error_changed]
+          description: Extensible vocabulary in 04-api.md; every event carries a status-facet snapshot at its revision.
+        recorded_at: { type: string, format: date-time }
+        observed_at: { type: string, format: date-time }
+        revision: { type: integer, format: int64, minimum: 1 }
+        state: { type: string }
+        cleanup_state: { type: string }
+        delivery_status: { type: string }
+        infrastructure_status: { type: string }
+        dispatch_status: { type: string }
+        result_complete: { type: boolean }
+        cancellation: { $ref: '#/components/schemas/Cancellation' }
+        cleanup_error: { $ref: '#/components/schemas/ExecutionError' }
+        delivery_error: { $ref: '#/components/schemas/ExecutionError' }
+        stage: { type: string, maxLength: 64 }
+        inferred: { type: boolean }
+        error: { $ref: '#/components/schemas/ExecutionError' }
+    ExecutionResult:
+      type: object
+      required: [execution_id, delivery_status, result_complete, artifacts]
+      properties:
+        execution_id: { $ref: '#/components/schemas/ExecutionId' }
+        exit_code: { type: integer, format: int32, description: Absent unless observed; zero is not inferred. }
+        delivery_status: { type: string, examples: [pending, complete, partial, failed] }
+        result_complete: { type: boolean }
+        error: { $ref: '#/components/schemas/ExecutionError' }
+        artifacts:
+          type: array
+          maxItems: 16
+          description: Template output contract limits results to 16 artifacts; extra outputs are rejected/quarantined.
+          items: { $ref: '#/components/schemas/Artifact' }
+    Artifact:
+      description: Published output only; name is the unique logical template output key, never a filesystem path.
+      type: object
+      required: [id, name, digest, size_bytes, media_type, download_url, expires_at]
+      properties:
+        id: { $ref: '#/components/schemas/LogicalId' }
+        name: { $ref: '#/components/schemas/LogicalId' }
+        digest: { $ref: '#/components/schemas/Digest' }
+        size_bytes: { type: integer, format: int64, minimum: 0 }
+        media_type: { type: string, maxLength: 128 }
+        download_url: { type: string, format: uri, description: 'Same-origin authenticated API route, never a cloud signed URL.' }
+        expires_at: { type: string, format: date-time }
+    ExecutionTemplate:
+      type: object
+      required: [template_id, version, description, allowed_overrides, input_schema, defaults, revoked]
+      properties:
+        template_id: { $ref: '#/components/schemas/LogicalId' }
+        version: { $ref: '#/components/schemas/Version' }
+        description: { type: string, maxLength: 1024 }
+        allowed_overrides:
+          type: array
+          maxItems: 32
+          items: { type: string, maxLength: 64 }
+        input_schema:
+          type: object
+          description: Published JSON Schema 2020-12 for this template's governed caller inputs; no internal mappings or executable hooks.
+        defaults:
+          type: object
+          description: Portable defaults only; no provider configuration, credentials, or internal identities.
+        revoked: { type: boolean }
+    IdentityContext:
+      type: object
+      required: [principal_id, principal_kind, authorized_contexts]
+      properties:
+        principal_id: { $ref: '#/components/schemas/LogicalId' }
+        principal_kind: { type: string, examples: [human, application] }
+        authorized_contexts:
+          type: array
+          maxItems: 200
+          description: M1 enrollment bounded to 200 contexts per principal; reject broader onboarding until pagination is designed.
+          items:
+            type: object
+            required: [application_id, environment, permissions]
+            properties:
+              application_id: { $ref: '#/components/schemas/LogicalId' }
+              environment: { $ref: '#/components/schemas/LogicalId' }
+              permissions:
+                type: array
+                maxItems: 32
+                items: { type: string, maxLength: 64 }
+    Page:
+      type: object
+      properties:
+        next: { type: string, format: uri, description: Absolute same-origin URL; absent when no further page exists. }
+    Problem:
+      type: object
+      required: [type, title, status, detail, instance, code, request_id]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string, maxLength: 128 }
+        status: { type: integer, format: int32, minimum: 400, maximum: 599 }
+        detail: { type: string, maxLength: 512 }
+        instance: { type: string, format: uri }
+        code:
+          type: string
+          maxLength: 64
+          examples: [invalid_execution, policy_denied, unauthenticated, not_found, idempotency_conflict, execution_terminal, cursor_expired, artifact_expired, unacceptable_representation, payload_too_large, unsupported_media_type, rate_limited, service_unavailable]
+        request_id: { type: string, maxLength: 128 }
+        invalid_params:
+          type: array
+          maxItems: 32
+          items:
+            type: object
+            required: [pointer, reason]
+            properties:
+              pointer: { type: string, maxLength: 256 }
+              reason: { type: string, maxLength: 256, description: No rejected values or secrets. }
