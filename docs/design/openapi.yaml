@@ -4,9 +4,11 @@ info:
   title: Infrastructure Platform Execution API
   version: 0.2.0
   description: >-
-    M0 design sketch; no endpoint is implemented or approved. M1 exercises the
-    fake provider; M3 supplies the selected live provider. Only API-audience Entra
-    access tokens are accepted. Object/data authorization is enforced on every
+    M0 target contract, not a claim of local implementation conformance. The
+    local core increment implements a subset with selectable fixture identities;
+    see ../progress.md for gaps. M1 exercises the fake provider; M3 supplies the
+    selected live provider. This target requires API-audience Entra access tokens.
+    Object/data authorization is enforced on every
     read and cancellation. All operations accept validated X-Flow-ID and W3C
     trace context and return server X-Request-ID and X-Flow-ID headers; neither
     grants authority. Local conventions await enterprise review V01.

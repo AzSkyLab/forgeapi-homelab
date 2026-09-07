@@ -1,6 +1,8 @@
 # Infrastructure Platform API — M0 review package
 
-**Revision:** 0.3.0, 2026-09-07. **Status:** proposed; awaiting both engineers' review. **Authorized scope:** design and review corrections only.
+**Revision:** 0.3.0, 2026-09-07. **Status:** proposed architecture/reference package. **Current authorization:** the requesting engineer approved local-first implementation on 2026-09-07; see [current work](../progress.md). This does not grant enterprise or cloud-deployment approval.
+
+For onboarding, use the [TLDR](../TLDR.md) and [runnable local setup](../../README.md). You do not need to review every design file to contribute to the approved local increment.
 
 Build a shared Go API foundation, prove it through a durable fake-provider execution, then test Azure Batch before implementing the live capability. The principal unresolved risk is combining the required Docker functionality with enforceable credential, image, and host isolation.
 
@@ -46,17 +48,17 @@ Accepting M1 records D01–D03/D05/D06 and the necessary tooling responsibilitie
 | 11 | [Delivery, requirements mapping, and acceptance](11-delivery.md), with [working agreement and test framework](working-agreement.md) |
 | 12 | [Ranked questions and verification register](12-verification.md) |
 
-[Official references and version register](references.md) distinguish published capabilities, proposed version pins, and environment evidence. [Package validation](validation.md) records only checks actually performed on these documents. All implementation and cloud tests are **not run**.
+[Official references and version register](references.md) distinguish published capabilities, proposed version pins, and environment evidence. [Package validation](validation.md) records checks on these documents. Current implementation evidence is tracked separately in [progress](../progress.md); cloud tests remain **not run**.
 
 ## Review gate
 
-The [combined prompt §12](../combined-build-prompt.md#12-first-response-produce-the-design-package) says: “Stop at the design-review gate until our signoff is recorded.” No application scaffolding, dependencies, migrations, Terraform resources, or deployments have been created. The OpenAPI file is a design artifact, not an implemented API.
+The [combined prompt §12](../combined-build-prompt.md#12-first-response-produce-the-design-package) established the original design-review gate. The requesting engineer subsequently explicitly authorized local API implementation and a demonstration with tests. That scoped instruction permits this increment without a separate manager gate; it does not approve every proposed design decision. The OpenAPI remains a target contract, with implementation gaps listed in [progress](../progress.md).
 
 | Reviewer / decision | Status | Evidence / date |
 | --- | --- | --- |
-| Requesting engineer: design and M1 scope | Pending | Not supplied |
+| Requesting engineer: local implementation | Approved, bounded | 2026-09-07: start building a locally runnable API demonstration with tests/TLDR; infrastructure later |
 | Manager: design and M1 scope | Pending | Not supplied |
-| Approved milestone | None | M1 proposed below |
+| Approved milestone | Local core increment toward M1 | Full M1 acceptance and connected gates remain outstanding |
 | Conditions / accepted API conventions | Pending | Record any changes and applicable ADR revisions |
 | Working agreement / agent and test approach | Requested, retained in revision 0.3.0; approval pending | Required repository/tests V20; optional agent preferences V21; nothing activated |
 
@@ -64,7 +66,7 @@ Recommended next approval: **M1 only**, the fake-provider vertical slice in sect
 
 To record review, add each reviewer's name, date, decision, reviewed package revision or commit, and conditions to this table or link an equivalent durable review record. An outstanding technical question does not imply a decision has been approved.
 
-Use the [ADR decision register](10-registry-decisions.md#adr-index) to record accept/conditional/defer per decision as part of the same package review. All ADRs remain Proposed until that human record exists. This revision does not supply signoff, and no implementation milestone is authorized.
+Use the [ADR decision register](10-registry-decisions.md#adr-index) to record accept/conditional/defer per decision. All ADRs remain Proposed until that decision record exists. The scoped local implementation approval above is not full architecture or M1 acceptance.
 
 ## Source baseline and workspace observations
 
@@ -75,4 +77,4 @@ Both source documents were read in full. The combined prompt governs sequencing 
 | [Combined build prompt](../combined-build-prompt.md) | `cdf49def46bc139117d6837008720ed587317145cf401d261d490b44f2c00017` |
 | [POC intent and requirements](../poc-intent-and-requirements.md) | `431a8a0b2d7334b33801396569ae4ba8ca0b9ea4cee173ab2a2be033adc621e6` |
 
-No applicable `AGENTS.md` was found in the visible workspace or parent directories. The visible workspace initially contained only these two documents and restricted metadata directories. `git status` could not recognize a Git repository; therefore no branch, commit, clean-worktree, or remote-state claim is made. Restore usable Git metadata before M1 collaboration. The POC's historical OCR link points to a file absent from this workspace; its substantive requirements are available in the reconstruction, so this does not block M0.
+At M0, no applicable `AGENTS.md` was found in the visible workspace or parent directories. The workspace initially contained only the two documents and restricted metadata directories, and Git was not usable. At the start of the local implementation increment on 2026-09-07, `git status` succeeded with a clean worktree; current repository instructions now exist in root `AGENTS.md`. The POC's historical OCR link points to a file absent from this workspace; its substantive requirements are available in the reconstruction, so this did not block M0.

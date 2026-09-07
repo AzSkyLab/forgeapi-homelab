@@ -1,12 +1,12 @@
 # Working agreement — engineers, Codex, agents, and tests
 
-**Status:** user-requested working agreement, revised 2026-09-07; approval pending. Supports [section 11](11-delivery.md); [ADR-0012](../adr/0012-engineering-working-agreement.md) records the recommendation. Required repository/test setup is V20; optional agent preferences are V21. This document neither approves M1 nor activates agents.
+**Status:** proposed full working agreement; local implementation authorized 2026-09-07. The concise active instructions and actual commands are now in [CONTRIBUTING](../../CONTRIBUTING.md), [AGENTS](../../AGENTS.md) and [current work](../progress.md). Supports [section 11](11-delivery.md); [ADR-0012](../adr/0012-engineering-working-agreement.md) records the recommendation. Broader test/enterprise gates below remain proposals where not implemented. No specialist agents are activated.
 
 ## Agreement to review first
 
 Recommend one accountable human owner per work item, one coordinating Codex session, small changes with observable acceptance criteria, and a shared Go-based test harness. Use bounded specialist agents for independent tasks when authorized and useful. Keep decisions and test evidence in the repository or linked work item so a new session can resume from recorded facts.
 
-You and your manager approve architecture/milestone direction together. After M1 approval, routine implementation and verification within that scope proceed without another approval for each file, helper, dependency pin, or test run. Material public-contract/security/scope changes are surfaced with a concrete recommendation. Provider experiments, cloud spending, production deployment and later milestones retain the gates already defined in the design.
+The requesting engineer has explicitly approved the local implementation increment without a separate manager gate. Broader architecture/milestone acceptance remains a human decision. Routine implementation and verification within the approved scope proceed without another approval for each file, dependency pin, or test run. Material public-contract/security/scope changes are surfaced with a concrete recommendation. Provider experiments, cloud spending, production deployment and later milestones retain their separate gates.
 
 ## People, responsibilities, and decisions
 
