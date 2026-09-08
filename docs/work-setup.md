@@ -4,6 +4,8 @@
 
 **Proven 2026-09-07 on Linux:** this setup created the identity objects, a real browser sign-in completed, and the authenticated walkthrough exited successfully. Setup rerun reused the same objects. Mac execution and that tenant's permissions/consent still need to be verified tomorrow.
 
+**Moving to another machine:** read [session transfer](session-transfer.md) first. If the intended tenant already has approved API/client registrations, use their public IDs and the manual local-configuration path; a new clone has no setup journal, so do not blindly rerun registration creation. Existing deployment data/state and lab executor credentials are not part of core setup.
+
 ## Copy/paste instruction
 
 > Set up this repository on this Mac using the currently authenticated Azure CLI tenant. Read AGENTS.md and this file; do not reread the design folder. Run the setup below, then complete a real Entra-authenticated walkthrough. Keep all real IDs/configuration in ignored local files. Do not create paid Azure resources, client secrets, broad Graph permissions, tenant-wide consent or security-policy exceptions. If sign-in needs the engineer's browser/MFA, ask them to complete that step; never request their password/token. Stop after real proof and record the results in docs/progress.md.

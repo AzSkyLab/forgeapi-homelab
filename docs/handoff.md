@@ -8,6 +8,7 @@
 
 ## Five-minute orientation
 
+- **New session on another machine?** Start with [session transfer](session-transfer.md): source/config/state boundaries, fresh-machine setup, pasteable prompt and Terraform extension assessment. A clone does not contain prior deployment records or credentials.
 - **Setting up at work tomorrow?** Follow [work-setup.md](work-setup.md): exact setup command, human sign-in and required live proof.
 - [TLDR](TLDR.md): what to explain and roadmap.
 - [Entra setup](entra-local.md): exact one-time identity configuration; no secret.
@@ -31,6 +32,8 @@
 | Secretless meeting walkthrough | `cmd/demo/main.go`, `login.go`, `scripts/demo.sh` |
 
 ## Next work, one task at a time
+
+**Terraform extensibility task:** [PAT-01 — Add the Terraform pattern interface and registry](session-transfer.md#pat-01-add-the-terraform-pattern-interface-and-registry) now has concrete implementation steps, acceptance criteria and a separate copy/paste prompt. It is the recommended task before another real pattern; it is not implemented. Select it explicitly to reprioritize from the core acceptance task below. Machine setup alone does not start the refactor.
 
 1. **Environment setup:** the single-user real Entra → Docker walkthrough passed on Linux. For the Mac/new approved tenant, follow [work-setup.md](work-setup.md). Second-user ownership denial/revocation with real tokens remains a separate unverified gate. Record only sanitized results.
 2. **Next authorized local coding task:** cancellation-budget failures, permanent/transient retry classification and history-budget/Continue-As-New behavior in `internal/orchestration/core_workflow.go`, `core.go`, `recovery.go` and focused store/Temporal tests. Read only relevant recovery requirements in `docs/design/05-temporal-recovery.md`. Preserve original deadlines, cancellation intent, outcome immutability and legacy replay.

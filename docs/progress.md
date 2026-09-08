@@ -1,5 +1,17 @@
 # Current work — local core implementation and acceptance
 
+## Pattern-registry handoff clarification — 2026-09-07
+
+Expanded the previously buried recommendation into [PAT-01: Add the Terraform pattern interface and registry](session-transfer.md#pat-01-add-the-terraform-pattern-interface-and-registry), with named extraction points, end-to-end binding/compatibility requirements, a test-only second pattern, checks and a dedicated implementation prompt. Linked it prominently from the main handoff. Status remains planned; selecting this task is separate from machine setup or authorization to add/provision a real resource. Documentation only; no code/runtime/Azure change. PASS: 37 local links/anchors across four handoff/status documents and `git diff --check`; previous runtime evidence was not rerun. Next action is destination setup, then the engineer's selection of core acceptance or PAT-01.
+
+## Cross-machine handoff and Terraform modularity review — 2026-09-07
+
+Added [session transfer](session-transfer.md), linked from handoff/work setup. The source checkout was clean at `3a2b74a` before this documentation change; the new handoff edits must also be included in the source transferred. The document separates fresh core setup from unsupported deployment-state migration, explains reuse of existing Entra registrations without the ignored bootstrap journal, and warns that completed-vault replay is not safe to treat as historical replay on an empty database.
+
+**Assessment:** API/SQL/outbox/Temporal/workspace/credential boundaries are reusable, but pattern ID/catalog selection, model/store defaults, target resource IDs, exact plan guard, variables, ARM checks, outputs and RBAC are still Key Vault-specific. A small pattern contract/registry extraction with Key Vault preserved and a synthetic test-only second pattern is recommended before another real resource type; it is not implemented or newly authorized. Existing repository execution, hosted MI and broader state/recovery remain separate work.
+
+**Evidence/limits:** read the actual model, plan guard, HTTP/store/worker/pattern and setup boundaries. PASS: all 30 links/anchors in the four handoff/status documents resolve, the existing design/schema checker passes, and `git diff --check` passes. No application, tenant or Azure test was rerun. Destination setup/Mac runtime remains unverified. No credentials/state copied, runtime behavior changed, commit or push performed. Next action: reproduce fresh local core on the destination; existing next coding task remains cancellation/retry/history-budget acceptance unless the engineer explicitly reprioritizes the Terraform extraction.
+
 ## Design/ADR reconciliation — 2026-09-07
 
 Updated the design package to 0.4.0 with current local topology, implementation notes on all original ADRs, actual layout/commands/pins, and an evidence overlay separating local/lab proof from future enterprise/live-compute gates. Added ADR-0013 for the already-authorized Key Vault/certificate exception; **all ADRs remain Proposed pending human review**. Original requirements and review findings were preserved. Four deployment operations now have a separate lab OpenAPI contract, leaving portable compute schemas and their provider-field denylist intact. Approval deduplication, legacy executor omission, zero pre-plan timestamp, public target metadata and no general repository/update/destroy support are explicit.
