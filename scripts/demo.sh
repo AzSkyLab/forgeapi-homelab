@@ -2,6 +2,11 @@
 # Docker builds a native helper; the host browser owns the loopback callback.
 set -eu
 cd "$(dirname "$0")/.."
+case "${FORGE_LOCAL_HELPER:-demo}" in
+  demo) client_binary=forgeapi-demo ;;
+  keyvault-worker) client_binary=forgeapi-keyvault-worker ;;
+  *) echo 'Only demo and keyvault-worker helpers are supported.' >&2; exit 1 ;;
+esac
 case "${1:-}" in
   -h|-help|--help) ;;
   *) test -f .env || { echo 'Complete docs/entra-local.md first (.env is missing).' >&2; exit 1; } ;;
@@ -24,7 +29,7 @@ docker build --target demo-build -t forgeapi-demo-build:local \
 mkdir -p .local/bin
 client_container=$(docker create --network none forgeapi-demo-build:local)
 trap 'docker rm "$client_container" >/dev/null' 0
-docker cp "$client_container:/out/forgeapi-demo" .local/bin/forgeapi-demo
+docker cp "$client_container:/out/$client_binary" ".local/bin/$client_binary"
 docker rm "$client_container" >/dev/null
 trap - 0
-exec ./.local/bin/forgeapi-demo "$@"
+exec "./.local/bin/$client_binary" "$@"

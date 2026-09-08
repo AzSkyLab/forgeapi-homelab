@@ -4,6 +4,8 @@
 
 ## Context
 
+**Implementation note, 2026-09-07:** ten compute operations and focused schema-response tests exist; enterprise conventions/full acceptance remain pending. Four Azure-specific spike operations have a separate [lab OpenAPI](../design/openapi-deployments.yaml); they do not expand portable compute schemas or represent general stack support.
+
 The public capability is temporary execution with observable progress, result and cleanup. A separate job object would duplicate its status. The organization-approved Zalando revision/profile is unknown; the source proposes 202 and lowercase states.
 
 ## Decision

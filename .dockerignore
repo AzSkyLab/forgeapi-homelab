@@ -5,3 +5,9 @@
 config/*.local.json
 bin
 coverage.out
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/*.tfvars
+**/*.tfvars.json

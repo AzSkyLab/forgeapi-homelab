@@ -21,7 +21,7 @@ These are proposed conventions, not a claim the sketch passes the enterprise lin
 
 ## Active API surface
 
-M1 exercises every active route using the fake and fixture artifacts. M3 replaces fixture transfer with authorized object-store transfer; it adds no provider fields.
+The local core implements the ten compute operations below with mandatory Entra and synthetic artifacts; full acceptance/enterprise convention approval remain open. [Compute OpenAPI](openapi.yaml) is the portable target contract. A separate [lab deployment OpenAPI](openapi-deployments.yaml) documents the implemented spike; Azure-specific target/identity fields do not enter compute schemas. M3's future live compute transfer adds no provider fields.
 
 | Method and route | Behavior | Permission |
 | --- | --- | --- |
@@ -78,4 +78,6 @@ After 202, failures appear in the execution/result/events, not as a retrospectiv
 
 ## Later route families — design only
 
-Future concepts include stacks/revisions, deployment targets, previews/plans, promotions, approvals/decisions, budgets/reservations, module catalogs and audit administration. Their schemas/authorization will be designed when those milestones are approved. They are intentionally absent from the active OpenAPI artifact. M1 audit evidence is available to reviewers through a controlled evidence export, not an unbuilt administrative API.
+General stacks/revisions, multi-target plans, promotions, budget/independent-approval services, module catalogs and audit administration remain future design. The bounded lab exception is **not** that general platform: `GET /deployment-patterns`, `POST /deployments`, `GET /deployments/{deployment_id}`, and `POST /deployments/{deployment_id}/approvals` are implemented and specified in the companion contract.
+
+The exact configured human owner needs a current developer grant and API-audience Entra token on all four routes. No caller target/identity/repository/HCL overrides, query parameters, deployment ETags/pagination, cancel/update/destroy/import or HTTP recovery endpoint exist. Creation atomically records an immutable receipt and plan outbox. Approval binds the saved plan and current target/executor; it has a required key header but deduplicates by deployment/plan, not a separate approval-key ledger. Original receipts lacking executor remain readable, never silently rebound. This lab output intentionally includes public Azure target/identity metadata and is not portable compute output. [Scope, replay and limitations](../key-vault-demo.md).

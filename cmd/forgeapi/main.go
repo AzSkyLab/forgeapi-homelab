@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"forgeapi/internal/auth"
+	"forgeapi/internal/deployment"
 	"forgeapi/internal/httpapi"
 	"forgeapi/internal/local"
 	"forgeapi/internal/orchestration"
 	"forgeapi/internal/store"
+	"forgeapi/internal/telemetry"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 )
@@ -33,12 +35,12 @@ func run() error {
 	}
 	if os.Args[1] == "health" {
 		c := http.Client{Timeout: 2 * time.Second}
-		r, err := c.Get("http://127.0.0.1:8080/healthz")
+		r, err := c.Get("http://127.0.0.1:8081/readyz")
 		if err != nil {
 			return errors.New("health check failed")
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 200 {
+		if r.StatusCode != 204 {
 			return errors.New("unhealthy")
 		}
 		return nil
@@ -56,6 +58,15 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	shutdownTelemetry, err := telemetry.Start(ctx, os.Getenv("FORGE_OTLP_ENDPOINT"), "forgeapi-"+os.Args[1], os.Getenv("LOCAL_CONTAINER") == "true")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		flush, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = shutdownTelemetry(flush)
+	}()
 	dbCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	s, err := store.Open(dbCtx, cfg.DatabaseURL)
 	cancel()
@@ -69,12 +80,33 @@ func run() error {
 		return s.Migrate(ctx)
 	case "api":
 		api := &httpapi.API{Repo: s, BaseURL: cfg.BaseURL, CursorKey: []byte(cfg.CursorKey), Auth: authenticator}
-		server := &http.Server{Addr: cfg.Listen, Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
+		if targetPath := os.Getenv("DEPLOYMENT_TARGET_FILE"); targetPath != "" {
+			api.Deployments = s
+			api.DeploymentTarget = func() (deployment.Target, error) { return deployment.LoadTarget(targetPath) }
+		}
+		server := &http.Server{Addr: cfg.Listen, Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 40 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
+		admin := &http.Server{Addr: "127.0.0.1:8081", ReadHeaderTimeout: 2 * time.Second, WriteTimeout: 3 * time.Second, Handler: httpapi.AdminHandler(func(ctx context.Context) error {
+			if err := s.Pool.Ping(ctx); err != nil {
+				return err
+			}
+			if _, err := s.TemplateRevoked(ctx); err != nil {
+				return err
+			}
+			_, err := auth.LoadPolicy(cfg.Entra.GrantsFile)
+			return err
+		})}
+		go func() {
+			if err := admin.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("private health listener failed")
+				stop()
+			}
+		}()
 		go func() {
 			<-ctx.Done()
 			shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_ = server.Shutdown(shutdown)
+			_ = admin.Shutdown(shutdown)
 		}()
 		slog.Info("local API listening", "url", cfg.BaseURL)
 		err := server.ListenAndServe()
@@ -97,7 +129,7 @@ func run() error {
 			return fmt.Errorf("worker startup failed")
 		}
 		defer w.Stop()
-		orchestration.Dispatch(ctx, s, c)
+		orchestration.Dispatch(ctx, s, c, auth.DispatchAuthorizer(cfg.Entra.GrantsFile, cfg.Entra.TenantID))
 		return nil
 	default:
 		return errors.New("unknown command; use api, worker, migrate, or health")

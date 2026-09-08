@@ -1,4 +1,4 @@
-"""Repository-relative M0 documentation checks; no application or cloud tests."""
+"""Repository-relative design/contract checks; no application or cloud effects."""
 from pathlib import Path
 import copy
 import hashlib
@@ -233,12 +233,89 @@ assert set(finding_ids) == {f'RF-{n:02d}' for n in range(1, 57)}
 assert '| A01 |' in delivery and '| A02 |' in delivery
 assert '| S11 |' in delivery
 
+# The Azure-specific lab contract is separate; do not relax the portable
+# compute property denylist or its exact ten-operation regression above.
+lab_spec = yaml.load((DESIGN / 'openapi-deployments.yaml').read_text(), Loader=UniqueLoader)
+assert lab_spec['openapi'] == '3.1.1'
+assert lab_spec['security'] == [{'EntraBearer': []}]
+lab_expected = {
+    ('get', '/deployment-patterns'): 'listDeploymentPatterns',
+    ('post', '/deployments'): 'createDeployment',
+    ('get', '/deployments/{deployment_id}'): 'getDeployment',
+    ('post', '/deployments/{deployment_id}/approvals'): 'approveDeployment',
+}
+
+def resolve_lab(value):
+    if isinstance(value, dict):
+        if '$ref' in value:
+            ref = value['$ref']
+            assert ref.startswith('#/'), f'Unexpected external lab reference: {ref}'
+            node = lab_spec
+            for part in ref[2:].split('/'):
+                node = node[part.replace('~1', '/').replace('~0', '~')]
+            return resolve_lab({**node, **{k: v for k, v in value.items() if k != '$ref'}})
+        return {k: resolve_lab(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [resolve_lab(v) for v in value]
+    return value
+
+resolve_lab(lab_spec)  # Every reference must resolve, including unused components.
+lab_operations = {}
+for path, path_item in lab_spec['paths'].items():
+    for method, operation in path_item.items():
+        if method not in {'get', 'post', 'put', 'patch', 'delete', 'head', 'options'}:
+            continue
+        lab_operations[(method, path)] = operation['operationId']
+        assert operation.get('security', lab_spec['security']) == [{'EntraBearer': []}]
+        params = [resolve_lab(p) for p in path_item.get('parameters', []) + operation.get('parameters', [])]
+        assert set(re.findall(r'\{([^}]+)\}', path)) == {p['name'] for p in params if p['in'] == 'path' and p.get('required')}
+        assert {'400', '401', '403', '404', '406', '503'} <= operation['responses'].keys()
+        if method == 'post':
+            assert {'409', '413', '415'} <= operation['responses'].keys()
+            assert any(p['name'] == 'Idempotency-Key' and p['required'] for p in params)
+            assert operation['requestBody']['required']
+        for code, response in operation['responses'].items():
+            headers = resolve_lab(response)['headers']
+            assert {'X-Request-ID', 'X-Flow-ID', 'Cache-Control'} <= headers.keys()
+            if code == '202':
+                assert {'Location', 'Retry-After'} <= headers.keys()
+            if code == '401':
+                assert 'WWW-Authenticate' in headers
+assert lab_operations == lab_expected
+assert len(set(lab_operations.values())) == 4
+router = (ROOT / 'internal/httpapi/api.go').read_text()
+lab_routes = {(method.lower(), path) for method, path in re.findall(r'r\.(Get|Post)\("([^"\n]+)"', router) if path.startswith('/deployment')}
+assert lab_routes == set(lab_expected), 'Lab OpenAPI/HTTP router drift'
+for schema in lab_spec['components']['schemas'].values():
+    Draft202012Validator.check_schema(resolve_lab(schema))
+lab_examples = 0
+for item in walk(lab_spec):
+    if 'schema' in item and 'example' in item:
+        Draft202012Validator(resolve_lab(item['schema']), format_checker=FormatChecker()).validate(item['example'])
+        lab_examples += 1
+lab_input = Draft202012Validator(resolve_lab(lab_spec['components']['schemas']['DeploymentInput']))
+valid_lab_input = {'pattern_id': 'azure-key-vault-v1'}
+lab_input.validate(valid_lab_input)
+for invalid in [{}, {'pattern_id': None}, {'pattern_id': 'other'}] + [
+    {**valid_lab_input, key: 'caller-override'} for key in ['target', 'executor', 'subscription_id', 'source', 'terraform']
+]:
+    assert not lab_input.is_valid(invalid), invalid
+lab_approval = Draft202012Validator(resolve_lab(lab_spec['components']['schemas']['DeploymentApprovalInput']))
+lab_approval.validate({'plan_digest': 'sha256:' + 'c' * 64})
+for invalid in [{}, {'plan_digest': None}, {'plan_digest': 'wrong'}, {'plan_digest': 'sha256:' + 'c' * 64, 'target': {}}]:
+    assert not lab_approval.is_valid(invalid), invalid
+lab_props = {key for item in walk(lab_spec) for key in item.get('properties', {})}
+assert not lab_props & {'certificate_path', 'private_key', 'client_secret', 'access_token', 'refresh_token'}
+
 print(json.dumps({
     'markdown_files': len(files),
     'numbered_sections': 12,
     'adrs': len(list((ROOT / 'docs/adr').glob('*.md'))),
     'local_links_and_anchors': checked_links,
     'openapi_operations': len(operations),
+    'lab_openapi_operations': len(lab_operations),
+    'lab_embedded_examples_validated': lab_examples,
+    'lab_input_and_router_regressions': True,
     'resolved_openapi_refs': len(refs),
     'component_schemas_checked': len(schemas),
     'embedded_examples_validated': example_count,

@@ -4,6 +4,8 @@
 
 ## Context
 
+**Current applicability, 2026-09-07:** enterprise registry/vault topology remains proposed. The single configured lab target, empty vault and RG-scoped executor roles in [ADR-0013](0013-local-terraform-lab-exception.md) are not a deployed BU registry, app-secret service or approval of this topology.
+
 Current subscriptions are pre-provisioned per BU and host multiple applications. Apps can span environments; production/nonproduction separation does not yet follow automatically. Shared vault/worker permissions can expand blast radius across apps.
 
 ## Decision

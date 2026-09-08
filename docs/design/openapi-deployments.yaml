@@ -1,0 +1,329 @@
+openapi: 3.1.1
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: ForgeAPI Local Key Vault Spike
+  version: 0.1.0
+  description: >-
+    Implemented lab-only companion to openapi.yaml, not the general stack API.
+    Requires an API-audience Entra human token, a current developer grant, and
+    the exact owner/tenant in the server-owned target. No app-only caller access.
+    A separately authenticated native worker plans/applies the pinned pattern;
+    caller tokens are never forwarded to ARM. No query parameters are supported.
+    Responses intentionally disclose Azure target and public executor identifiers
+    only to that owner. No private key, token, certificate path or raw plan is exposed.
+    Missing spike configuration returns 404; invalid/unavailable configuration 503.
+    All responses carry X-Request-ID, X-Flow-ID and Cache-Control no-store.
+    GET has no ETag/304 or pagination contract. No update, destroy, cancel, import,
+    arbitrary repository/HCL or recovery endpoint exists. See 07-terraform.md
+    and ../adr/0013-local-terraform-lab-exception.md for scope and evidence limits.
+  contact:
+    name: ForgeAPI engineering
+x-design-status: implemented-lab-contract-human-review-pending
+servers:
+  - url: http://localhost:8080
+    description: Loopback-only local API; not an Azure-hosted deployment.
+security:
+  - EntraBearer: []
+tags:
+  - name: Local deployments
+    description: One configured retained vault, with saved-plan approval.
+paths:
+  /deployment-patterns:
+    get:
+      operationId: listDeploymentPatterns
+      tags: [Local deployments]
+      summary: Read the one configured pattern and target
+      responses:
+        '200':
+          description: Singleton pattern list; no pagination or arbitrary catalog.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/Correlation' }
+            X-Flow-ID: { $ref: '#/components/headers/Correlation' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    minItems: 1
+                    maxItems: 1
+                    items: { $ref: '#/components/schemas/DeploymentPattern' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /deployments:
+    post:
+      operationId: createDeployment
+      tags: [Local deployments]
+      summary: Durably accept the configured vault intent and plan outbox
+      description: >-
+        Requires Idempotency-Key. Same owner/key/canonical caller body replays the
+        immutable original 202 receipt, even after status/configuration advances,
+        subject to current access. Changed body or another owner record for the
+        same case-insensitive resource ID conflicts. Acceptance is not a plan or
+        Azure success. No caller-supplied target, executor or Terraform is accepted.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        description: JSON only, at most 64 KiB; duplicate/unknown fields rejected.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeploymentInput' }
+            example: { pattern_id: azure-key-vault-v1 }
+      responses:
+        '202':
+          description: Original immutable acceptance receipt; poll Location for current status.
+          headers:
+            Location: { $ref: '#/components/headers/Location' }
+            Retry-After: { $ref: '#/components/headers/RetryAfter' }
+            X-Request-ID: { $ref: '#/components/headers/Correlation' }
+            X-Flow-ID: { $ref: '#/components/headers/Correlation' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Deployment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '415': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /deployments/{deployment_id}:
+    parameters:
+      - { $ref: '#/components/parameters/DeploymentId' }
+    get:
+      operationId: getDeployment
+      tags: [Local deployments]
+      summary: Read owned deployment state and transition history
+      description: >-
+        Missing or differently owned records return 404 after the configured-owner
+        access gate. Terminal records and their original target bindings are retained.
+        Success retains the vault; recovery_required is not permission to retry apply.
+      responses:
+        '200':
+          description: Current deployment projection, not the original acceptance receipt.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/Correlation' }
+            X-Flow-ID: { $ref: '#/components/headers/Correlation' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Deployment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /deployments/{deployment_id}/approvals:
+    parameters:
+      - { $ref: '#/components/parameters/DeploymentId' }
+    post:
+      operationId: approveDeployment
+      tags: [Local deployments]
+      summary: Approve the exact saved plan and enqueue apply atomically
+      description: >-
+        The current owner approves their own lab operation; no independent-approver
+        or budget service is implemented. Require an unexpired planned record and
+        identical current target, pattern and executor binding. Mismatch/expiry is
+        409, not automatic re-plan. Idempotency-Key syntax is required but this
+        endpoint does not persist a separate key/payload mapping: duplicates converge
+        by deployment ID and exact plan digest. Matching apply_queued/applying/succeeded
+        records return the same acknowledgement, not a second apply. The acknowledgement
+        is not deployment success. Old human-bound plans cannot use the new executor.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        description: JSON only, at most 64 KiB; duplicate/unknown fields rejected.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeploymentApprovalInput' }
+            example: { plan_digest: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' }
+      responses:
+        '202':
+          description: Stable acknowledgement of the exact approved plan.
+          headers:
+            Location: { $ref: '#/components/headers/Location' }
+            Retry-After: { $ref: '#/components/headers/RetryAfter' }
+            X-Request-ID: { $ref: '#/components/headers/Correlation' }
+            X-Flow-ID: { $ref: '#/components/headers/Correlation' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeploymentApproval' }
+              example: { deployment_id: dep_example01, plan_digest: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', status: approved }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '406': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '415': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    EntraBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: API-audience access token; configured human owner and current developer grant are also mandatory.
+  parameters:
+    DeploymentId:
+      name: deployment_id
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Creation persists owner/key/body binding; approval deduplicates by deployment/plan, not by this header.
+      schema: { type: string, pattern: '^[A-Za-z0-9_-]{16,128}$' }
+  headers:
+    Correlation:
+      description: Validated or server-generated correlation ID; never authority.
+      schema: { type: string }
+    NoStore:
+      description: Do not cache authenticated responses.
+      schema: { type: string, const: no-store }
+    Location:
+      description: Absolute same-origin deployment status URL.
+      schema: { type: string, format: uri }
+    RetryAfter:
+      description: Suggested polling delay in seconds, not completion proof.
+      schema: { type: string, const: '2' }
+  responses:
+    Problem:
+      description: >-
+        Sanitized error. 400 invalid input/query/correlation/key, 403 configured-owner
+        or local-boundary denial, 404 absent configuration or missing/forbidden object,
+        406 unacceptable representation, 409 deployment conflict, 413 body limit,
+        415 media type, 503 unavailable configuration/authentication/storage.
+        Some 503 paths return Retry-After; it is not guaranteed on every 503.
+      headers:
+        X-Request-ID: { $ref: '#/components/headers/Correlation' }
+        X-Flow-ID: { $ref: '#/components/headers/Correlation' }
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthenticated:
+      description: Missing or invalid API token.
+      headers:
+        WWW-Authenticate:
+          description: Bearer authentication challenge.
+          schema: { type: string }
+        X-Request-ID: { $ref: '#/components/headers/Correlation' }
+        X-Flow-ID: { $ref: '#/components/headers/Correlation' }
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Digest:
+      type: string
+      pattern: '^sha256:[0-9a-f]{64}$'
+    DeploymentInput:
+      type: object
+      additionalProperties: false
+      required: [pattern_id]
+      properties:
+        pattern_id: { type: string, const: azure-key-vault-v1 }
+    DeploymentApprovalInput:
+      type: object
+      additionalProperties: false
+      required: [plan_digest]
+      properties:
+        plan_digest: { $ref: '#/components/schemas/Digest' }
+    DeploymentExecutor:
+      type: object
+      required: [mode, client_id, principal_id, certificate_sha256]
+      properties:
+        mode: { type: string, const: lab_certificate }
+        client_id: { type: string, format: uuid }
+        principal_id: { type: string, format: uuid }
+        certificate_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    DeploymentTarget:
+      type: object
+      description: Server-owned Azure/public-identity binding. Legacy retained records omit executor; new admissions require it. No credential material or local credential path.
+      required: [tenant_id, subscription_id, resource_group_id, location, name, owner, pattern_digest]
+      properties:
+        tenant_id: { type: string, format: uuid }
+        subscription_id: { type: string, format: uuid }
+        resource_group_id: { type: string }
+        location: { type: string }
+        name: { type: string }
+        owner: { type: string, description: 'Configured Entra owner binding, not caller-supplied ownership.' }
+        pattern_digest: { $ref: '#/components/schemas/Digest' }
+        executor: { $ref: '#/components/schemas/DeploymentExecutor' }
+    DeploymentPattern:
+      type: object
+      required: [pattern_id, description, target, actions, retained_after_success]
+      properties:
+        pattern_id: { type: string, const: azure-key-vault-v1 }
+        description: { type: string }
+        target: { $ref: '#/components/schemas/DeploymentTarget' }
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items: { type: string, const: create }
+        retained_after_success: { type: boolean, const: true }
+    Deployment:
+      type: object
+      required: [deployment_id, pattern_id, target, state, events]
+      properties:
+        deployment_id: { type: string }
+        pattern_id: { type: string, const: azure-key-vault-v1 }
+        target: { $ref: '#/components/schemas/DeploymentTarget' }
+        state:
+          type: string
+          examples: [accepted, planning, planned, apply_queued, applying, succeeded, failed, recovery_required, rejected_no_effect]
+          description: Extensible output. rejected_no_effect preserves a proven rejected attempt; not success or permission to retry its plan.
+        plan_digest: { $ref: '#/components/schemas/Digest' }
+        plan_expires_at:
+          type: string
+          format: date-time
+          description: Current Go serialization emits 0001-01-01T00:00:00Z before a plan exists; do not interpret it as a valid plan window.
+        resource_id: { type: string }
+        vault_uri: { type: string, format: uri, description: Resource metadata only; not a credential or a data-plane access grant. }
+        error_code: { type: string }
+        rejection_correlation_id: { type: string, description: Sanitized ARM rejection evidence reference. }
+        events:
+          type: array
+          items:
+            type: object
+            required: [state, at]
+            properties:
+              state: { type: string }
+              at: { type: string, format: date-time }
+    DeploymentApproval:
+      type: object
+      required: [deployment_id, plan_digest, status]
+      properties:
+        deployment_id: { type: string }
+        plan_digest: { $ref: '#/components/schemas/Digest' }
+        status: { type: string, const: approved }
+    Problem:
+      type: object
+      required: [type, title, status, detail, instance, code, request_id]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string }
+        instance: { type: string, format: uri }
+        code: { type: string }
+        request_id: { type: string }

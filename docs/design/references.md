@@ -4,32 +4,35 @@
 
 ## Version register
 
-| Component / standard | M0 record | Verification and implementation action |
+Implementation reconciliation, 2026-09-07: actual local pins below come from `go.mod`, Dockerfile, Compose files, the pattern lock and recorded checks in [progress](../progress.md), not a new upstream-version search. Historical M0 research remains in the reference register. Hosted/future selections are not inferred from local pins.
+
+| Component / standard | Current pin or historical/future record | Evidence boundary / remaining action |
 | --- | --- | --- |
 | OpenAPI | **3.1.1**, design API version **0.2.0**, JSON Schema 2020-12 | Revised sketch; local Redocly/schema/example checks in validation.md; enterprise profile unverified |
 | Zalando | Public living guidelines consulted 2026-09-05; changelog includes 2026-03-16 | Authoritative organizational commit **unknown**; commit-list retrieval failed. V01 must supply approved immutable revision; changelog date is not a pin |
 | Local lint proposal | `platform-api-design/0.1.0`, executable redocly.yaml, CLI **2.51.2** | Local structure/examples profile checked; two documented internal-design exceptions, not organization-approved Zalando rules |
-| Go | Candidate **1.27.1**, listed by official downloads | Not installed/tested for this project; pin architecture checksum/container digest in M1 after compatibility/security review |
-| chi | Preferred router; exact module version **not selected** | Confirm team standard and select/pin in M1; no dependency installed |
-| Temporal Go SDK | Candidate **1.48.0**, latest release resolved to version permalink on 2026-09-07 | Tagged go.mod requires Go **1.25.4**; replaces prior inspected 1.42.0 candidate. Actual server/SDK/replay/tracing compatibility still V03/V04; not installed as an application dependency |
+| Go | **1.27.1** in go.mod and pinned build image | Native/container checks and Darwin cross-builds recorded; actual Mac execution unverified |
+| chi / PostgreSQL driver | **chi 5.3.2 / pgx 5.10.0** | Installed application dependencies; HTTP/real PostgreSQL tests recorded |
+| Temporal Go SDK / local fixture | **SDK 1.48.0 / API 1.63.4**, digest-pinned Temporal CLI/dev-server image **1.8.3** | Local workflow/process/replay evidence recorded; CLI image tag is not an asserted enterprise server version. Full V03/V04 remain open |
 | Temporal server / namespaces / retention / authorizer | Existing self-hosted AKS service supplied as fact; versions/settings **unknown** | Temporal owner provides actual versions/config, mTLS and operation authorization V03 |
 | Temporal versioning | Worker Versioning docs rechecked 2026-09-07; initial GetVersion/replay pending hosting capability | Published minimums: Go SDK 1.35.0, self-hosted server 1.29.1, CLI 1.4.1 and UI 2.38.0. Versions alone do not prove configuration or safe rollout; V03 verifies compatibility, patching remains initial fallback |
 | KEDA | **2.20** Temporal-scaler docs examined; source notes introduction from 2.17+ | Deployed ACA scaler availability/version/mTLS and safe scale-in **unknown**; fixed replicas proposed |
 | ACA | Managed service; deployment API version/profile/grace behavior **unknown** | Application-lifecycle docs describe SIGTERM then 30s window; verify deployed behavior, do not infer a user-controlled KEDA version |
-| Terraform CLI | Candidate **1.16.0**, official binary listing verified | Untested for this project. M2 pins binary/checksum and tested provider/module set; no claim this version is already deployed |
+| Terraform CLI | Lab **1.15.9**; original foundation candidate **1.16.0** remains untested | Lab plan/apply and validation recorded for 1.15.9 only; future foundation compatibility is separate |
 | OpenTofu | No version selected | Evaluate only for concrete benefit; no compatibility/equivalence commitment |
-| AzureRM / terraform-exec / terraform-json | Exact versions **not selected** | M2 foundation / M4 executor matrix and lock checksums required |
+| Terraform provider / execution libraries | Lab **AzAPI 2.11.0**, vault API **2025-05-01**, platform-specific checksums locked; native CLI subprocess | AzureRM / terraform-exec / terraform-json not selected/installed; no future library/backend compatibility claim |
 | Azure Batch / SDK | Allocation candidate recorded; API version and Go SDK packages **not selected** | M2 verify management/data-plane API coverage, Entra auth and features before pinning; examples in product docs are not a Go compatibility test |
 | VMSS | Fallback only; orchestration mode/API version **unselected** | Evaluate only if Batch gate warrants it; own a separate fleet |
 | Worker image / OS / node agent / Docker / Compose | Exact versions **unknown** | V07/V09 must identify and test Gallery image version plus full runtime/software manifest |
-| PostgreSQL Flexible Server | Recommended; engine major/minor, region/tier/HA **unselected** | Select supported engine with pgx/migrations/auth tests; record service restore settings |
-| Key Vault / Blob / Entra | Documented service patterns inspected; tenant/resource configuration **unknown** | V02/V06/V10 record actual auth endpoints, permissions, private DNS, retention and identity scope |
+| PostgreSQL | Local **16.14-alpine**, digest-pinned; Flexible Server remains future | Local migration/transaction/recovery tests recorded; hosted Entra/TLS/HA/restore settings unselected |
+| Key Vault / Blob / Entra | Actual lab tenant/API apps, retained vault, UAMI and certificate SP configured; Blob backend not implemented | Narrow evidence and ignored local configuration in identity/vault guides; enterprise V02/V06/V10 remain open |
 | Microsoft Graph | **v1.0** List manager page inspected | Application permissions documented unsupported; tenant-approved query/feed still undecided |
 | Infracost | Public Cloud price-book/API/FAQ docs inspected; CLI/edition version **unselected** | Vendor auth/licensing/egress/rate tests before selection; no implied self-hosted parity |
-| OTEL SDK / collector, golangci-lint, CI actions, Dev Container | **Not selected** | Pin tested versions/digests in M1; enterprise OTLP path V12 |
-| Test framework | Proposed Go testing/httptest, Temporal testsuite/replayer, Testcontainers PostgreSQL and pinned Temporal dev fixture | Standard library follows Go pin; module/server/container versions selected and tested in M1.1; no harness installed yet |
-| API test/lint tools | Redocly **2.51.2**, PyYAML **6.0.3**, jsonschema **4.26.0** used for M0 docs | Exact commands/results in validation.md; M1 Go request/response validator remains unselected (`kin-openapi` candidate). No dialect downgrade; enterprise rules remain V01 |
-| Codex project instructions / subagents / worktrees | Current official guidance consulted for revision 0.2.0; installed client/version/config **not inventoried** | Working agreement and future AGENTS.md are proposed; availability/permission/loading checks in M1.1; no custom agents configured during M0 |
+| OTEL / collector / CI | SDK **1.43.0**, collector **0.160.0** digest-pinned, checkout **5.0.0** full-commit-pinned | Local traces/redaction and CI definition exist; remote CI and enterprise exporter unverified. No golangci-lint or Dev Container installed |
+| Test framework | Go testing/httptest, Temporal testsuite/replayer and **Compose** PostgreSQL/Temporal fixtures | Installed and locally exercised; Testcontainers was not selected. See working agreement for actual commands |
+| API test/lint tools | Redocly **2.51.2**, PyYAML **6.0.3**, Python jsonschema **4.26.0**; Go JSON Schema **6.0.2** | Go actual-response checks for both OpenAPI contracts; not a runtime request validator. No kin-openapi/Spectral dependency; enterprise rules remain V01 |
+| Local authentication helper/executor | Existing MSAL Go **1.9.0**; PKCE for humans, approved certificate for native lab executor | Real human API and non-human ARM/provider read evidence are separate; no client password/fallback |
+| Project instructions / agents / worktrees | AGENTS.md, CONTRIBUTING, handoff and progress exist; Git usable | One coordinator; explicit delegation only. No custom agent configuration, parallel writers or work-client verification implied |
 | SOC 2 reference | AICPA 2017 Trust Services Criteria with 2022 revised points of focus | Proposed control-family mapping only; organization's audit scope/version/retention decisions remain authoritative |
 
 An M0 candidate is not a tested toolchain. Recheck security/support status when each milestone begins; replace a candidate if evidence warrants it and record the reviewed reason and exact tested pins. Do not silently follow `latest` in source, image, tool or deployment manifests.

@@ -20,12 +20,30 @@ x-app: &app
     PUBLIC_BASE_URL: http://localhost:8080
     DATABASE_URL: postgres://forge:local-fixture-only@postgres:5432/forge?sslmode=disable
     TEMPORAL_ADDRESS: temporal:7233
+    FORGE_OTLP_ENDPOINT: http://collector:4318/v1/traces
+    # No Azure credentials or Terraform binaries enter the API/compute containers.
+    DEPLOYMENT_TARGET_FILE: /config/deployment.local.json
   networks: [local]
   read_only: true
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "2"}
 
 services:
+  collector:
+    image: otel/opentelemetry-collector:0.160.0@sha256:e495787f07dbe432ce763ebaf5bc3d113850e9eee2250ade7a3da6a882d0d69a
+    command: [--config=/etc/otelcol/config.yaml]
+    volumes: ["./config/collector.yaml:/etc/otelcol/config.yaml:ro"]
+    networks: [local]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "2"}
   postgres:
     image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     environment:
@@ -80,6 +98,7 @@ services:
     volumes: ["./config:/config:ro"]
     depends_on:
       migrate: {condition: service_completed_successfully}
+      collector: {condition: service_started}
     healthcheck:
       test: [CMD, /forgeapi, health]
       interval: 2s
@@ -89,9 +108,11 @@ services:
   worker:
     <<: *app
     command: [worker]
+    volumes: ["./config:/config:ro"]
     depends_on:
       migrate: {condition: service_completed_successfully}
       temporal: {condition: service_healthy}
+      collector: {condition: service_started}
 
 volumes:
   postgres-data:

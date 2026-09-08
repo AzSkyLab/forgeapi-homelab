@@ -43,23 +43,23 @@ These are development assistants, distinct from Temporal activities or agents ru
 | Builder | Implement one independently scoped change in assigned files/module | Diff, meaningful tests, exact test output and unresolved integration assumptions |
 | Reviewer | Review the actual diff against task acceptance, especially auth, concurrency and cleanup | Actionable findings with location, risk and verification gaps; no edits unless reassigned |
 
-Default to the coordinator alone for small/sequential changes. Once this agreement is approved and encoded in applicable `AGENTS.md`, request a specialist only when it can independently advance the task or review a consequential change. Proposed limit: coordinator plus at most two active helpers, subject to the actual session limit. Keep the user's current model selection unless they set another preference. An extra reviewer is another analysis pass, not independent security certification or human approval.
+Use one coordinating session. Current repository instructions require **explicit delegation**, even for independent work; this proposal does not activate helpers. If authorized, proposed limit is coordinator plus at most two active helpers, subject to the actual session limit. Keep the user's current model selection unless they set another preference. An extra reviewer is another analysis pass, not independent security certification or human approval.
 
 Every delegation carries: objective, owned files, relevant contracts/acceptance, allowed actions, prohibited scope, dependency assumptions and expected evidence. Tell builders they share a codebase, must preserve others' changes and must coordinate overlapping edits. Read-only review can overlap implementation in a different area; review the final integrated diff again when dependencies change. Do not keep delegating the same search, let helpers redefine public contracts independently, or allow nested delegation by default. Stop unneeded helpers and consolidate their output into one handoff.
 
 Current Codex guidance supports explicit subagent requests and applicable project instructions; availability and controls depend on the client/session. This M0 proposal does not imply agents are already configured or running. [Official subagent guidance](https://learn.chatgpt.com/docs/agent-configuration/subagents).
 
-Use separate Git worktrees/branches for independent **writing** sessions when supported, with one integration owner. Helpers in a shared checkout still require disjoint file ownership; a spawned agent is not automatically an isolated worktree. Share contracts first and serialize edits to OpenAPI, migrations, dependency locks and central configuration. Worktrees isolate files, not external databases, ports, namespaces or cloud resources: give test runs unique resource names and credentials/scopes appropriate to their environment. Usable Git metadata is a prerequisite here and remains unresolved in V20. [Official worktree guidance](https://learn.chatgpt.com/docs/environments/git-worktrees).
+Use separate Git worktrees/branches for independent **writing** sessions when supported, with one integration owner. Helpers in a shared checkout still require disjoint file ownership; a spawned agent is not automatically an isolated worktree. Share contracts first and serialize edits to OpenAPI, migrations, dependency locks and central configuration. Worktrees isolate files, not external databases, ports, namespaces or cloud resources: give test runs unique resource names and credentials/scopes appropriate to their environment. Git is now usable; no concurrent writer setup or CODEOWNERS assignment is implied. [Official worktree guidance](https://learn.chatgpt.com/docs/environments/git-worktrees).
 
 ## Repository instructions and durable project state
 
-During M1.1, create a short root `AGENTS.md` from the accepted agreement. Include actual setup/check commands once they exist; keep the task runner authoritative rather than copying scripts into instructions. Codex documents repository instruction discovery; verify a fresh session reads the intended repository guidance and check for relevant personal overrides. Team configuration belongs in the repo, with no assumed edits to either engineer's global configuration. [Official AGENTS.md guidance](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
+Root `AGENTS.md`, `CONTRIBUTING.md`, `docs/handoff.md` and `docs/progress.md` now exist and are the active instruction/onboarding/task record. Keep Makefile/scripts authoritative for exact commands. Codex documents repository instruction discovery; check for relevant personal overrides in each environment. Team configuration belongs in the repo, with no assumed edits to either engineer's global configuration. [Official AGENTS.md guidance](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
 
-The initial root instructions should explicitly cover these rules:
+Keep the active root instructions aligned with these rules:
 
 - Read the current milestone/task and relevant accepted design. Continue authorized work through required verification; do not turn roadmap entries into permission.
 - Respect one editor per shared file and preserve existing changes. Use independent worktrees for concurrent writing sessions when available.
-- Request bounded investigator/builder/reviewer help under the agent rules above only when useful; integrate and verify the result yourself.
+- Delegate bounded investigator/builder/reviewer work only when explicitly authorized; integrate and verify the result yourself.
 - Keep cloud calls outside deterministic workflows, provider fields outside public contracts, and secret values outside history/logs/test reports.
 - Run the change-specific checks plus required gates. Never count skipped tests as passed, weaken assertions to make CI green, or claim mock/fake results prove cloud isolation.
 - Update task/contract/ADR evidence when behavior or a consequential decision changes. Hand off exact checks, remaining uncertainty and next step.
@@ -68,38 +68,43 @@ Use `CONTRIBUTING.md` in M1 for human setup/branch/review instructions, `AGENTS.
 
 ## Test framework and evidence boundaries
 
-Recommended application tools are named below; exact versions/digests and Go 1.27.1/Temporal SDK candidate compatibility must be tested and pinned in M1.1. Standard-library components follow the selected Go toolchain. Application harnesses remain uninstalled/unverified; the separate M0 documentation tooling has actual results in validation.md.
+The current harness uses Go 1.27.1, chi/httptest, Temporal SDK 1.48.0 and Compose-based PostgreSQL/Temporal fixtures. Exact pins are in [references](references.md#version-register), `go.mod`, Dockerfile and Compose files. Local tests and selected connected Entra evidence are recorded in [progress](../progress.md); enterprise, full failure-matrix and Mac evidence remain separate. No test framework installation is needed merely because an older M0 candidate appears below.
 
-| Layer | Proposed framework / setup | What it proves and where it runs |
+| Layer | Current framework / remaining scope | What it proves and where it runs |
 | --- | --- | --- |
 | Domain, policy, state transitions, normalization | Native Go `testing`, table-driven tests, small explicit fakes | Input/decision behavior and transition invariants; local and every code PR |
 | HTTP/auth/object boundaries | `net/http/httptest` against actual chi router/middleware; local signed JWT/JWKS fixtures | Request/response and denial behavior without Entra access; real tenant validation remains V02 |
-| OpenAPI and public payloads | M0 uses pinned Redocly 2.51.2 plus repository-relative Python schema/example regressions; M1 evaluates enterprise rules and a 3.1.1-capable Go request/response validator | Reproduce [validation commands](validation.md); do not substitute style/schema lint for authorization or runtime testing; `kin-openapi` remains an unselected compatibility candidate |
+| OpenAPI and public payloads | Redocly 2.51.2 and Python schema/example checks; `santhosh-tekuri/jsonschema/v6` 6.0.2 validates actual compute/lab-deployment handler responses in Go | No runtime request-middleware validator or enterprise profile selected; input guards have focused tests. Keep both OpenAPI contracts separate; no dialect downgrade |
 | Workflow logic | Temporal Go SDK `testsuite.TestWorkflowEnvironment`, controlled activity results/time skipping | Durable-decision logic, timers/cancel/error paths; does not prove a real server/worker restart |
 | Workflow compatibility | Temporal Go SDK workflow replayer with sanitized representative histories | Candidate workflow code replays histories for affected versions; run on workflow/SDK/interceptor changes |
-| SQL, outbox and concurrency | Testcontainers for Go PostgreSQL module; real migrations and unique per-run database | Transaction/constraint/lease behavior and restart durability; local container runtime and CI integration job, no SQLite substitute |
+| SQL, outbox and concurrency | Docker Compose PostgreSQL fixture, `pgx` and tagged Go integration tests; **not Testcontainers** | Real transactions/migrations/concurrency and retained evidence. `make test-integration` runs store tests; do not run concurrent suites against the same fixture DB/project |
 | Real orchestration integration | Pinned local Temporal development server/CLI plus PostgreSQL fixture; separately launched API/worker and durable fake external state | Kill/restart/acknowledgement gaps F03/F11/F13/F15/F18. Test harness controls process/container lifecycle; no fixed sleeps as correctness assertions |
-| Provider conformance | One Go contract suite with fake and later Azure fixture factories and explicit capability expectations | Same observable invariants, including no duplicate launch and verified cleanup; record actual effects rather than just SDK mock calls |
-| Security, fuzz and telemetry | Native Go fuzz seeds/property checks, race detector, collector/test exporter with synthetic secret canaries | Malformed input/idempotency/cursor safety, data races and pre-export redaction; fuzz budgets bounded in CI |
+| Provider conformance | Persistent simulated-effect/recovery cases now; shared live-compute adapter conformance remains future | Record actual fixture effects, not only mock call counts. Key Vault evidence is not live compute conformance |
+| Security, fuzz and telemetry | Auth/contract negative tests, race detector, OTLP wire tests/redaction canaries and govulncheck; broad fuzz campaign remains unverified | Token/cursor/body redaction and selected boundaries, not full S01–S11 closure |
 | End-to-end acceptance and performance | Go HTTP scenario runner/standard benchmarks; approved live workload scenarios for F/S/V evidence | Full API→workflow→fake locally; enterprise/dev and live Azure gates separately; p50/p95 require real observations and agreed targets |
 
-Go's [testing](https://pkg.go.dev/testing) and [httptest](https://pkg.go.dev/net/http/httptest) provide the base; [Temporal's Go test suite](https://docs.temporal.io/develop/go/best-practices/testing-suite) and [Testcontainers PostgreSQL](https://golang.testcontainers.org/modules/postgres/) cover their distinct layers. [Spectral](https://github.com/stoplightio/spectral) and [kin-openapi](https://github.com/getkin/kin-openapi) are candidates with version-specific capability checks; do not down-convert the API silently to accommodate tooling. Use the organization's approved 3.1 validator if the candidate cannot validate the actual dialect.
+Go's [testing](https://pkg.go.dev/testing) and [httptest](https://pkg.go.dev/net/http/httptest), the [Temporal test suite](https://docs.temporal.io/develop/go/best-practices/testing-suite) and real Compose fixtures provide distinct evidence layers. Testcontainers, Spectral and kin-openapi were M0 alternatives, not installed requirements. Enterprise OpenAPI convention approval still requires V01; JSON Schema response checks do not replace authorization tests.
 
-Keep ordinary Go tests near their package and cross-process/provider suites in `tests/`. Use explicit `integration` / `acceptance` test selection so default tests need no cloud credentials. The required integration job must fail if Docker/Temporal/PostgreSQL is unavailable; it cannot silently skip and report success. Fixture dependency images/tools are pinned and pre-fetched through the approved development path. Dispose only resources the run owns, using test cleanup plus a bounded failure janitor.
+Current tests live beside packages, including tagged cross-process tests in `internal/orchestration` and PostgreSQL tests in `internal/store`; no `tests/` tree is required. Use the `integration` tag and explicit fixture endpoints for those suites. Default tests need no cloud credentials. Required integration jobs fail if their dependencies are unavailable. Fixture images/tools are pinned; first use needs approved download access. Dispose only resources the run owns. The current Compose fixture project is shared by local invocations, so serialize runs; separate worktrees alone do not isolate it.
 
 Local fixtures may use generated short-lived test signing keys and disposable local-only database credentials. They are isolated test plumbing, not an Entra bypass or deployed credential pattern. Production startup must reject fixture issuer/fake-provider configuration in a live profile. Use synthetic inputs; no customer data, production credentials or raw secret-bearing histories in test fixtures/CI artifacts. A test runner's Docker access never demonstrates that untrusted workload Docker access is safe.
 
 ## Shared commands, CI gates, and definition of done
 
-The following names are the proposed M1 developer interface; **they do not exist yet**. The M0 documentation checker/lint command in [validation](validation.md) does exist and is not application scaffolding. Dev Container and GitHub Actions will wrap the same checks. No browser/UI test framework is needed for the API-only first slice. The exact required local/connected/live case sets are in [section 11](11-delivery.md#test-tiers-and-positive-acceptance).
+The following commands exist in the current Makefile/scripts. Dockerfile pins the Go build/test environment; no Dev Container is checked in. GitHub Actions defines local checks in `.github/workflows/core.yml`; remote execution is not claimed. Documentation validation remains a separate [Python/Redocly command](validation.md), not part of `make check`. The full required local/connected/live case sets remain in [section 11](11-delivery.md#test-tiers-and-positive-acceptance).
 
-| Proposed command | Purpose / when required |
+| Current command | Purpose / when required |
 | --- | --- |
-| `make check` | Formatting check, vet/lint, API lint/schema examples, unit/HTTP/workflow tests with race detection where supported, and build; every relevant code PR |
-| `make test-integration` | Real PostgreSQL/Temporal/fake scenarios; required for M1 behavior changes at these boundaries and before milestone acceptance |
-| `make test-replay` | Replay retained sanitized histories; required on workflow/SDK changes |
-| `make test-security` | Auth/authorization/redaction regressions, fuzz seed corpus and `govulncheck`; required for security-relevant changes, dependency gates before release |
-| `make test-acceptance` | Requires an explicit environment/authorized target; runs connected dev or live Azure scenarios only for the current approved milestone |
+| `make check` | Host Go + C compiler: formatting, vet, unit/HTTP/workflow/contract tests with race detection, and build |
+| `make test-docker` | Containerized credentials-free unit/race/contract/redaction tests; no host Go needed |
+| `make test-integration` | Real PostgreSQL store/migration/concurrency tests; not Temporal integration |
+| `make test-core` | Real PostgreSQL + Temporal, worker process kill/restart, selected history replay and recovery |
+| `make vuln-docker` | Pinned govulncheck; reachable advisories fail the gate |
+| `make up`; `make demo` | Upgrade/start the local stack preserving volumes; browser PKCE and authenticated synthetic HTTP/Temporal walkthrough |
+| `sh scripts/verify-local.sh` | Mac/Linux preflight, tests, startup and signed-in local demo; actual Mac execution remains unverified |
+| `make keyvault-identity-check` | Explicit read-only check under the configured lab executor against the existing vault; needs valid lab config/certificate, not a unit test |
+
+`make test-replay`, `make test-security` and `make test-acceptance` are not implemented targets; use the actual suites above rather than copy the old proposed names. No live create/apply is part of normal tests or core acceptance. `make keyvault-demo`/`make keyvault-worker` are separately scoped operational commands, not default verification gates; use the retained-result replay instructions in the Key Vault runbook.
 
 The [Go race detector](https://go.dev/doc/articles/race_detector), [fuzzing](https://go.dev/doc/security/fuzz/) and [govulncheck](https://go.dev/doc/security/vuln/) complement behavior tests; none individually proves correctness or security. Disable optional tool telemetry where required by the enterprise development policy; the Spectral container's documented opt-out must be included if that distribution is selected.
 

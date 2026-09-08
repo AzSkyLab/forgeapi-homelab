@@ -2,6 +2,8 @@
 
 **Status:** proposed. POC limits/measurements now in design; full governance is later. [Index](README.md).
 
+**Current boundary:** no pricing service, budget ledger, manager lookup, notifications or independent approval service is implemented. The separately authorized empty-vault spike uses same-owner saved-plan approval and no data-plane operations; it neither proves zero subscription cost nor implements these future governance controls. [Lab exception](../adr/0013-local-terraform-lab-exception.md). No paid experiment is authorized.
+
 ## M1–M3 scope
 
 Bound admission by finite approved profiles, active concurrency, accepted-to-finish timeout, independently enforced maximum resource lifetime, storage/output limits and an agreed experiment spend ceiling. Reserve concurrency transactionally so simultaneous submissions cannot exceed the configured allowance. Unknown cleanup retains capacity/accounting exposure until reconciled. A cap on requested compute is not a guarantee Azure charges cannot exceed a monetary number during failures.

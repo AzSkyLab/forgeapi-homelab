@@ -15,7 +15,7 @@
 
    ```sh
    node scripts/setup-entra.mjs --tenant <confirmed-tenant-UUID>
-   docker compose up --build -d --wait
+   make up
    sh scripts/demo.sh
    ```
 
@@ -25,6 +25,7 @@
    ```sh
    make test-docker
    make test-integration
+   make test-core
    ```
 
    Or rehearse the whole sequence with `sh scripts/verify-local.sh` after setup.

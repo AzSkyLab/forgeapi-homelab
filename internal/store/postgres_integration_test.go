@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func database(t *testing.T) *Store {
+func unmigratedDatabase(t *testing.T) *Store {
 	t.Helper()
 	url := os.Getenv("FORGE_TEST_DATABASE_URL")
 	if url == "" {
@@ -49,6 +49,14 @@ func database(t *testing.T) *Store {
 	}
 	t.Cleanup(p.Close)
 	s := &Store{Pool: p}
+	return s
+}
+
+func database(t *testing.T) *Store {
+	t.Helper()
+	s := unmigratedDatabase(t)
+	ctx := context.Background()
+	var err error
 	if err = s.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}

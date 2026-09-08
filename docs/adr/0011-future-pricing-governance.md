@@ -4,6 +4,8 @@
 
 ## Context
 
+**Current applicability, 2026-09-07:** pricing, budget ledger, manager decisions and notifications remain future. The [lab exception](0013-local-terraform-lab-exception.md) has same-owner saved-plan approval only, no independent approver or cost gate; it does not prove zero subscription cost or authorize paid experiments.
+
 Compute viability needs measured consumption and finite limits. Persistent-stack use later needs negotiated-rate estimates, concurrent budget admission and independently authorized approvals. Pricing-vendor authentication and background manager resolution are unverified dependencies.
 
 ## Decision

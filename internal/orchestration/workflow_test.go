@@ -5,6 +5,7 @@ import (
 	"forgeapi/internal/execution"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
+	"go.temporal.io/sdk/workflow"
 	"testing"
 	"time"
 )
@@ -21,6 +22,7 @@ func TestWorkflow(t *testing.T) {
 			env := suite.NewTestWorkflowEnvironment()
 			now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 			env.SetStartTime(now)
+			env.OnGetVersion("local-core-lifecycle", workflow.DefaultVersion, 1).Return(workflow.DefaultVersion)
 			steps := []string{}
 			env.RegisterActivityWithOptions(func(_ context.Context, s Step) error { steps = append(steps, s.Name); return nil }, activity.RegisterOptions{Name: "FakeStep"})
 			if tc.cancel {

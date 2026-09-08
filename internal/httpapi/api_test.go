@@ -20,6 +20,8 @@ type fixtureRepo struct {
 	owner  string
 }
 
+func (f *fixtureRepo) TemplateRevoked(context.Context) (bool, error) { return false, f.err }
+
 func (f *fixtureRepo) Get(_ context.Context, id string) (execution.Record, error) {
 	if f.err != nil {
 		return execution.Record{}, f.err
@@ -37,7 +39,9 @@ func (f *fixtureRepo) Submit(_ context.Context, owner, _, _, _ string, _ executi
 }
 func (f *fixtureRepo) Cancel(_ context.Context, _, _, _, _, _ string) (store.Accepted, error) {
 	f.calls++
-	return store.Accepted{}, f.err
+	now := time.Now().UTC()
+	b, _ := json.Marshal(execution.Cancellation{ID: "cancel-test", ExecutionID: f.record.Execution.ID, Status: "requested", RequestedAt: now, DeadlineAt: now.Add(time.Minute)})
+	return store.Accepted{Body: b, Location: f.record.Execution.Links["self"]}, f.err
 }
 func fixture() (*API, *fixtureRepo) {
 	r := execution.NewRecord("alice", "http://localhost:8080", execution.Defaults(), time.Now().UTC())

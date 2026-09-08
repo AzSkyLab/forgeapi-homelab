@@ -4,6 +4,8 @@
 
 ## Context
 
+**Current applicability, 2026-09-07:** future live-compute proposal; no Batch, disposable-VM or workload-Docker isolation experiment has run. The completed Key Vault spike does not establish any of these controls. [Evidence status](../design/12-verification.md#current-evidence-overlay).
+
 The representative test needs Docker capabilities and untrusted-source isolation. Batch is the first candidate, but product container support does not prove required host/metadata/image boundaries or disposable cleanup.
 
 ## Decision

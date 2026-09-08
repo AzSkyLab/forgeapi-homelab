@@ -22,6 +22,14 @@ type Step struct {
 // Execution uses durable timers. Fake steps are atomic and idempotent in PostgreSQL.
 // No external provider runs here; retry safety of real cloud effects is future work.
 func Execution(ctx workflow.Context, in Input) error {
+	if workflow.GetVersion(ctx, "local-core-lifecycle", workflow.DefaultVersion, 1) != workflow.DefaultVersion {
+		return coreWorkflow(ctx, in)
+	}
+	return legacyWorkflow(ctx, in)
+}
+
+// Retained for replay compatibility with histories recorded before core v1.
+func legacyWorkflow(ctx workflow.Context, in Input) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Second,
 		RetryPolicy:         &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second},

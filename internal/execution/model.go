@@ -73,6 +73,8 @@ type Execution struct {
 	CompletedAt          *time.Time        `json:"completed_at,omitempty"`
 	TimedOutFrom         string            `json:"timed_out_from,omitempty"`
 	Error                *Failure          `json:"error,omitempty"`
+	CleanupError         *Failure          `json:"cleanup_error,omitempty"`
+	DeliveryError        *Failure          `json:"delivery_error,omitempty"`
 	Cancellation         *Cancellation     `json:"cancellation,omitempty"`
 	Links                map[string]string `json:"links"`
 }
@@ -100,6 +102,8 @@ type Event struct {
 	ResultComplete       bool          `json:"result_complete"`
 	Cancellation         *Cancellation `json:"cancellation,omitempty"`
 	Error                *Failure      `json:"error,omitempty"`
+	CleanupError         *Failure      `json:"cleanup_error,omitempty"`
+	DeliveryError        *Failure      `json:"delivery_error,omitempty"`
 }
 
 type Log struct {
@@ -131,6 +135,8 @@ type Result struct {
 
 // Record is private storage. Never serialize it as a public API response.
 type Record struct {
+	Correlation  Correlation
+	CoreVersion  int
 	Execution    Execution
 	Owner        string
 	Spec         Spec
@@ -168,5 +174,5 @@ func (r *Record) Event(kind string, now time.Time) {
 		Sequence: int64(len(r.Events) + 1), EventType: kind, RecordedAt: now, Revision: e.Revision,
 		State: e.State, CleanupState: e.CleanupState, DeliveryStatus: e.DeliveryStatus,
 		InfrastructureStatus: e.InfrastructureStatus, DispatchStatus: e.DispatchStatus,
-		ResultComplete: e.ResultComplete, Cancellation: cancel, Error: e.Error})
+		ResultComplete: e.ResultComplete, Cancellation: cancel, Error: e.Error, CleanupError: e.CleanupError, DeliveryError: e.DeliveryError})
 }

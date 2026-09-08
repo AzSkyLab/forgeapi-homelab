@@ -4,6 +4,8 @@
 
 ## Context
 
+**Implementation note, 2026-09-07:** normal local startup requires Entra; real human PKCE/API evidence exists. Local grants are narrower than the full registry below. [ADR-0013](0013-local-terraform-lab-exception.md) records the approved lab certificate SP/RG role and verified ARM/Terraform reads. The UAMI exists but is not used locally; hosted MI/WIF and production developer isolation remain unimplemented/unverified.
+
 API callers, CI, platform workers, bootstrap and untrusted workloads need different privileges. Subscription RBAC, possession of an execution ID, queue names and editable tags cannot establish application-level ownership.
 
 ## Decision

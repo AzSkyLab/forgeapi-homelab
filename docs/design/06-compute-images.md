@@ -2,6 +2,8 @@
 
 **Status:** proposed experiment, not a verified Batch architecture. [Index](README.md).
 
+**Current boundary:** compute remains synthetic; none of the Batch/VM/Docker-isolation experiments below has been run. Real PostgreSQL/Temporal process-loss and simulated-effect evidence is in [progress](../progress.md). The completed empty-Key-Vault spike is infrastructure evidence only; it does not establish any live compute, image or workload isolation requirement here.
+
 ## Contract
 
 The following is interface-level design, not repository scaffolding. Methods take an authenticated internal execution binding, context/deadline and immutable portable spec; adapters resolve restricted provider configuration outside workflow history.

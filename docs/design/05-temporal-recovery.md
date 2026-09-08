@@ -2,6 +2,10 @@
 
 **Status:** proposed; all timing values below are initial engineering settings to test, not approved performance/SLO thresholds. [Index](README.md).
 
+**Implementation update:** the local core uses a real Temporal development server, persistent simulated effects, leased recovery tickets and version-gated legacy/new workflow replay. Process-loss/replay and selected failure cases passed; cancellation budgets, retry classification, history/Continue-As-New and the rest of the matrix remain acceptance work. Enterprise Temporal TLS/namespace authorization and ACA shutdown remain unverified. See [current evidence](12-verification.md#current-evidence-overlay).
+
+The separate Key Vault spike has stable `forgeapi-deployment-<id>-plan` / `-apply` workflows on `forgeapi-local-key-vault`. Each invokes one bounded native Terraform activity (20-minute start-to-close, 25-minute schedule-to-close, one attempt); failed/uncertain apply requires operator recovery, not automatic replay/apply. This is a lab exception to the short compute activity model, not an implementation of the full future stack workflow. [ADR-0013](../adr/0013-local-terraform-lab-exception.md) preserves this distinction; compute rules below remain requirements for compute.
+
 ## Workflow and queue ownership
 
 `ExecuteV1(execution_id, spec_digest, lifecycle_generation)` is the only initial workflow. Its input and activity outputs contain identifiers, hashes and sanitized outcomes. Activities fetch authorized immutable records; no command, full environment, credential, provider resource identifier, source content or raw provider response enters history. Provider references live in restricted PostgreSQL storage and are addressed by internal handle. Workflows cannot choose arbitrary target mappings or queue names from caller data.
@@ -83,7 +87,7 @@ Sweeper leases target/execution tickets, enumerates only registered provider sco
 
 ## Replay, history, deployment, and recovery
 
-Candidate SDK is Go SDK 1.48.0, rechecked 2026-09-07; deployed server/namespace versions remain **unknown**. Use `GetVersion` patching and retained compatible code paths initially; replay a sanitized corpus before release. Do not adopt deprecated worker-versioning assignment-rule APIs. Worker Deployment Versioning is an optional follow-on after V03 confirms the server/SDK floors in [references](references.md), feature configuration and rollout/rollback tests. [Go workflow versioning](https://docs.temporal.io/develop/go/workflows/versioning).
+The local SDK is pinned to Go SDK 1.48.0; the Compose Temporal CLI/dev-server image is 1.8.3, digest-pinned. Enterprise server/namespace versions remain **unknown**. `GetVersion` patching and retained legacy paths are implemented with selected real-history replay evidence. Continue-As-New is not yet proven. Do not adopt deprecated worker-versioning assignment-rule APIs. Worker Deployment Versioning is an optional follow-on after V03 confirms the server/SDK floors in [references](references.md), feature configuration and rollout/rollback tests. [Go workflow versioning](https://docs.temporal.io/develop/go/workflows/versioning).
 
 Set history event/byte budgets below actual namespace limits. Initial guard: Continue-As-New when the SDK recommends it or measured history reaches the lower of 10,000 events and 50% of the configured event limit, or 50% of the configured byte limit. V04 measures events/bytes per poll including timers/activity retries, estimates `poll_count × measured events_per_cycle + signal/error margin`, and exercises a deliberately low guard. Carry execution/spec/generation, last sequence, cancel intent reference and original absolute deadlines; wait for handlers to finish and prevent losing queued cancellation before Continue-As-New. Keep cleanup tickets external. Never store log chunks or object bytes in history. Payload codec is a conditional extra control for permitted regulated references, not permission to store secrets.
 

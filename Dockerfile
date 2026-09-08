@@ -11,6 +11,7 @@ FROM dev AS demo-build
 ARG CLIENT_OS
 ARG CLIENT_ARCH
 RUN CGO_ENABLED=0 GOOS=${CLIENT_OS} GOARCH=${CLIENT_ARCH} go build -trimpath -o /out/forgeapi-demo ./cmd/demo
+RUN CGO_ENABLED=0 GOOS=${CLIENT_OS} GOARCH=${CLIENT_ARCH} go build -trimpath -o /out/forgeapi-keyvault-worker ./cmd/keyvault-worker
 
 FROM dev AS build
 RUN CGO_ENABLED=0 go build -trimpath -o /out/forgeapi ./cmd/forgeapi

@@ -1,0 +1,30 @@
+name: Local core
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: core-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  local-core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Formatting, vet, unit/race tests and build
+        run: docker compose -f compose.test.yaml run --build --rm --no-deps tests make check
+      - name: Real PostgreSQL, Temporal process-loss recovery and replay
+        run: make test-core
+      - name: Build portable runtime (no publication)
+        run: docker build --target runtime -t forgeapi-ci:check .
+      - name: Dependency vulnerability gate
+        run: docker compose -f compose.test.yaml run --rm --no-deps tests go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+      - name: Isolated test cleanup
+        if: always()
+        run: docker compose -f compose.test.yaml down

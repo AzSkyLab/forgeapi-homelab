@@ -2,6 +2,18 @@
 
 **Status:** proposed. M2 foundations and M4+ stack executor are separately authorized milestones. [Index](README.md).
 
+## Implemented local spike
+
+The engineer separately approved one empty Key Vault before the general stack milestone. That create is complete; no additional provisioning follows from this document. [ADR-0013](../adr/0013-local-terraform-lab-exception.md) records the scope/identity exception; [runbook](../key-vault-demo.md) and [lab OpenAPI](openapi-deployments.yaml) describe the actual interface.
+
+- API admission/approval persist deployment records and outboxes atomically. A native worker executes the embedded content-digest-pinned pattern, with **Terraform 1.15.9 / AzAPI 2.11.0 / vault ARM API 2025-05-01**; provider locks cover Linux amd64 and both Mac architectures. No AzureRM, terraform-exec/json library, remote module fetch or existing-repo execution is implemented.
+- One configured RG/name/region/owner, exactly one retained empty Standard vault, ARM-only, RBAC enabled and public access disabled. Saved-plan digest/expiry, current grant, target, pattern and executor bindings are checked before apply. No update/delete/import, raw caller Terraform, automatic retry of an uncertain apply, or second mutation owner.
+- Current ARM/provider auth is certificate-only under a dedicated lab SP with RG-scoped Key Vault Contributor. The API caller has no forwarded ARM credential. The UAMI is retained inventory, not current execution auth. No hosted MI endpoint/adapter or federation is configured. See [identity limits](../terraform-identity.md).
+- Backend is restricted local state in persistent host workspaces, not the future Entra Blob backend. Plans/state and rejected attempts remain retained as recovery evidence. Approval is same-owner lab approval, not independent production approval or a pricing/budget gate.
+- The original create succeeded under human CLI auth; the replacement identity passed actual ARM/Terraform reads only. The original rejected attempt was marked `rejected_no_effect` only after exact no-effect proof. Generic partial-apply/import/restore recovery remains unimplemented. Do not reapply old plans, erase evidence or create another resource to establish a test result.
+
+The sections below remain future foundation/general-stack requirements, not a claim that their backend, isolation, pricing or recovery controls exist in this spike.
+
 ## Immediate foundation ownership
 
 Use one pinned Terraform toolchain for platform foundations. Candidate **Terraform 1.16.0** is published; it has not been installed or tested for this project. Pin exact CLI checksum, AzureRM provider version/checksums and module commits after the M2 compatibility spike. Do not label a candidate “tested.” OpenTofu remains an evaluation only if licensing, organizational support, or a required feature presents a concrete benefit; there is no dual-tool promise. [Terraform 1.16.0 release](https://releases.hashicorp.com/terraform/1.16.0/).

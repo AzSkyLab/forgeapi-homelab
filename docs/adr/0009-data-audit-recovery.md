@@ -4,6 +4,8 @@
 
 ## Context
 
+**Implementation note, 2026-09-07:** forward migrations, DB audit and sanitized local OTLP are implemented, not immutable cloud evidence storage. Retention pruning, hosted Entra DB roles and cross-store restore remain open; local tracestate is discarded. Restricted retained lab plans/state are an explicit exception to the future backend design. [Security implementation boundary](../design/09-security-data.md).
+
 Mutable operations, workflow histories, source/log/output artifacts, future state/plans and audit evidence have different authority, access and retention. The prompt requires a minimum 30-day audit floor without inventing universal financial-services retention.
 
 ## Decision

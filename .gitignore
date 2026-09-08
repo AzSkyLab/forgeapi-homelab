@@ -7,3 +7,9 @@
 !/.env.*.example
 /config/*.local.json
 *.test
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json

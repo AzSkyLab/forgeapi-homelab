@@ -4,9 +4,11 @@ info:
   title: Infrastructure Platform Execution API
   version: 0.2.0
   description: >-
-    M0 target contract, not a claim of local implementation conformance. The
-    local core increment implements a subset with selectable fixture identities;
-    see ../progress.md for gaps. M1 exercises the fake provider; M3 supplies the
+    Portable compute target contract; all ten operations are implemented locally,
+    with remaining acceptance gaps in ../progress.md. Normal startup requires
+    Entra; fixture identities exist only in automated tests. The four implemented
+    lab deployment operations are specified separately in openapi-deployments.yaml.
+    M1 exercises the fake provider; M3 supplies the
     selected live provider. This target requires API-audience Entra access tokens.
     Object/data authorization is enforced on every
     read and cancellation. All operations accept validated X-Flow-ID and W3C
@@ -513,7 +515,7 @@ components:
     Tracestate:
       name: tracestate
       in: header
-      description: Allowlisted W3C trace state; never authorization or arbitrary baggage.
+      description: Validated W3C trace state; the local implementation discards it because no vendor list is approved. Never authorization or arbitrary baggage.
       schema: { type: string, maxLength: 512 }
     Cursor:
       name: cursor

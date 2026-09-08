@@ -2,6 +2,8 @@
 
 **Status:** proposed. [Index](README.md).
 
+**Current implementation:** the local core implements the bounded template/owner model and separate outcome/delivery/cleanup projections, not the full BU/team/classification registry below. Local deployment records form a separate aggregate in `internal/deployment` and migration 005; their [lab contract](openapi-deployments.yaml) binds a configured target/executor and saved-plan approval. They are not the full future Stack/Revision model. See [progress](../progress.md) for evidence and remaining acceptance.
+
 ## Ownership and permission model
 
 `Principal(tid, oid, kind)` has explicit `Grant(permission, scope, validity, provenance)` relationships. `Application` belongs to registered owner teams and a BU; `ApplicationEnvironment` binds an app to an environment and permitted target registrations. A team may serve several applications and an application may span environments. An execution permanently records its admission-time owning app/BU/team binding; current grants control reads and cancellation after ownership changes.

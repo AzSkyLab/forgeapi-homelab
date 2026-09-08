@@ -4,6 +4,27 @@
 
 ## Component and data ownership
 
+### Current local topology
+
+```text
+Human browser PKCE → Entra → loopback API (Compose)
+                                 ↓ accepted intent + outbox
+                          PostgreSQL (Compose)
+                                 ↓
+                 Temporal dev server/UI (Compose)
+                    ↙                       ↘
+       synthetic compute worker       native Key Vault worker
+              (Compose)                (stopped after proof)
+                    ↓                       ↓
+          durable simulated effects    pinned Terraform → ARM
+                    ↓                  seven-day certificate SP
+             local OTLP collector
+```
+
+The API and compute containers have no Azure credential/TF binary; the native infrastructure worker alone reads the restricted lab certificate. Human API authorization is separate from executor Azure RBAC. Deployment intent binds the public executor IDs/fingerprint; Terraform/ARM authentication has no human CLI fallback. The UAMI/RG role exists but is not used locally. Current local DB credentials and unauthenticated Temporal dev/UI access are loopback/private-development plumbing, **not** the hosted identity/TLS/DB-role design below. Compose's bridge is not an egress sandbox. Do not mount host credentials or expose these services remotely.
+
+The API's four [deployment operations](openapi-deployments.yaml) are an owner-restricted, Azure-specific companion to portable compute. They do not accept raw HCL/repository URLs. See [ADR-0013](../adr/0013-local-terraform-lab-exception.md) for the completed lab scope and [Terraform design](07-terraform.md#implemented-local-spike) for plan/apply/recovery. The remaining component/identity tables and sequences describe target architecture; ACA/runtime-transfer/Batch roles are not deployed.
+
 | Component | Authority | Boundary |
 | --- | --- | --- |
 | HTTP API | Caller authentication, object authorization, validation/admission, public representation | Cannot provision compute; does not trust caller-selected ownership |

@@ -1,6 +1,6 @@
 # Infrastructure Platform API — M0 review package
 
-**Revision:** 0.3.0, 2026-09-07. **Status:** proposed architecture/reference package. **Current authorization:** the requesting engineer approved local-first implementation on 2026-09-07; see [current work](../progress.md). This does not grant enterprise or cloud-deployment approval.
+**Revision:** 0.4.0, 2026-09-07 (implementation reconciliation; M0 review baseline was 0.3.0). **Status:** target architecture with current implementation notes, not blanket human acceptance. **Current authorization:** local core acceptance; the separately approved one-vault/identity spike is complete. See [current work](../progress.md) and [ADR-0013](../adr/0013-local-terraform-lab-exception.md). No additional infrastructure or paid hosting is authorized.
 
 For onboarding, use the [TLDR](../TLDR.md) and [runnable local setup](../../README.md). You do not need to review every design file to contribute to the approved local increment.
 
@@ -8,7 +8,13 @@ Build a shared Go API foundation, prove it through a durable fake-provider execu
 
 Start with the decision table below, then the [executive summary](01-context.md), [Docker/VM boundary](06-compute-images.md#exact-demo-and-docker-authority), and [M1 completion/tests](11-delivery.md#two-engineer-split-and-m1-stop-condition). Review the [working agreement](working-agreement.md) alongside task ownership and tests; you explicitly requested it. Supporting files provide arguments, not separate file-by-file signoffs. Changes and disagreements are recorded against all 56 findings in the [review response](../review/m0-design-review-response-2026-09-07.md).
 
-Package-wide evidence rule: recommendations and numerical defaults below are proposals; environment experiments remain not run. “Documented support,” “local check passed,” and “owner-approved environment evidence” are distinct. The [verification register](12-verification.md) records each unresolved gate; repeated caveats in individual sections do not add extra approvals. `A` = positive acceptance, `F` = failure case, `S` = security/quality case, `V` = external decision/verification, `D` = decision below. Component names are explained in [architecture](02-architecture.md#component-and-data-ownership).
+Package-wide evidence rule: unimplemented architecture and numerical acceptance defaults remain proposals. Recorded local tests, real Entra sign-in and narrow Azure spike evidence are distinct from enterprise/live-compute acceptance. The [verification register](12-verification.md) separates partial evidence from unresolved gates; repeated caveats do not add extra approvals. `A` = positive acceptance, `F` = failure case, `S` = security/quality case, `V` = external decision/verification, `D` = decision below. Component names are explained in [architecture](02-architecture.md#component-and-data-ownership).
+
+## Current implementation, in brief
+
+Normal development uses Entra + Docker Compose (API, synthetic compute worker, real PostgreSQL/Temporal and local OTLP). The separately authorized native Terraform worker created one retained empty Key Vault; the later certificate-only executor passed actual ARM/Terraform reads, not a new apply. Its UAMI is bootstrap inventory, not the active local credential. Hosted managed identity, enterprise Temporal, Batch and general Terraform-repository execution remain future work. No full M1 or production-isolation claim is made.
+
+The [compute OpenAPI](openapi.yaml) retains ten portable operations; the [lab deployment OpenAPI](openapi-deployments.yaml) documents four Azure-specific spike operations separately. [Actual commands and test layers](working-agreement.md#test-framework-and-evidence-boundaries), [current layout](11-delivery.md#current-layout-and-dependencies), [pins](references.md#version-register) and [evidence status](12-verification.md#current-evidence-overlay) are the implementation-facing references. Original requirements/review findings remain preserved; future design text is not a statement that its controls already exist.
 
 ## M0 decisions requested
 
@@ -48,7 +54,7 @@ Accepting M1 records D01–D03/D05/D06 and the necessary tooling responsibilitie
 | 11 | [Delivery, requirements mapping, and acceptance](11-delivery.md), with [working agreement and test framework](working-agreement.md) |
 | 12 | [Ranked questions and verification register](12-verification.md) |
 
-[Official references and version register](references.md) distinguish published capabilities, proposed version pins, and environment evidence. [Package validation](validation.md) records checks on these documents. Current implementation evidence is tracked separately in [progress](../progress.md); cloud tests remain **not run**.
+[Official references and version register](references.md) distinguish historical research, implemented pins and future choices. [Package validation](validation.md) records document/contract checks; [progress](../progress.md) records runtime evidence. Batch, hosted ACA and enterprise security tests remain **not run**; the narrow Key Vault/identity evidence does not close them.
 
 ## Review gate
 
@@ -60,13 +66,13 @@ The [combined prompt §12](../combined-build-prompt.md#12-first-response-produce
 | Manager: design and M1 scope | Pending | Not supplied |
 | Approved milestone | Local core increment toward M1 | Full M1 acceptance and connected gates remain outstanding |
 | Conditions / accepted API conventions | Pending | Record any changes and applicable ADR revisions |
-| Working agreement / agent and test approach | Requested, retained in revision 0.3.0; approval pending | Required repository/tests V20; optional agent preferences V21; nothing activated |
+| Working agreement / agent and test approach | Requested; local instructions/tests implemented, broader agreement review pending | Actual commands in working agreement; V20 partially evidenced. Coordinator only; helpers require explicit delegation |
 
 Recommended next approval: **M1 only**, the fake-provider vertical slice in section 11, subject to the API-convention and development identity/Temporal decisions in section 12. Cloud prerequisites may remain open while independent M1 work proceeds after signoff. M1 approval would not authorize M2 provisioning, production deployment, or future stack operations.
 
 To record review, add each reviewer's name, date, decision, reviewed package revision or commit, and conditions to this table or link an equivalent durable review record. An outstanding technical question does not imply a decision has been approved.
 
-Use the [ADR decision register](10-registry-decisions.md#adr-index) to record accept/conditional/defer per decision. All ADRs remain Proposed until that decision record exists. The scoped local implementation approval above is not full architecture or M1 acceptance.
+Use the [ADR decision register](10-registry-decisions.md#adr-index) to record accept/conditional/defer per decision. ADRs remain Proposed pending human review; ADR-0013 records separately authorized lab exceptions without inventing a broader signoff. Scoped implementation approval is not full architecture or M1 acceptance.
 
 ## Source baseline and workspace observations
 

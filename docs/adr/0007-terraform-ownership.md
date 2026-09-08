@@ -4,6 +4,8 @@
 
 ## Context
 
+**Implementation note, 2026-09-07:** the original M2/M4 sequence has a separately approved one-vault exception in [ADR-0013](0013-local-terraform-lab-exception.md). It uses Terraform **1.15.9**, AzAPI **2.11.0**, restricted local state and a certificate-only native worker. General repo/bundle execution, Entra remote backend, foundations and hosted executor are still future; Terraform 1.16.0 below remains an untested foundation candidate.
+
 Runtime disposable workloads differ from persistent declarative infrastructure. Competing Terraform and SDK writers create drift and recovery ambiguity. Later reproducible stack plans need immutable dependencies, isolated state and bound approvals.
 
 ## Decision
@@ -22,4 +24,4 @@ Runtime pool instances are absent from foundation Terraform state. Future stack 
 
 ## Verification dependencies
 
-V05/V14/V15 for approved foundations/ACA ownership and hosting; V19 for exact executor pins, transitive reproducibility, offline init, locking, secret-state inspection, unknown security values, partial apply and lost-acknowledgement recovery. M4 features are not implemented during M1–M3.
+V05/V14/V15 for approved foundations/ACA ownership and hosting; V19 for exact executor pins, transitive reproducibility, offline init, locking, secret-state inspection, unknown security values, partial apply and lost-acknowledgement recovery. The lab spike does not satisfy the general M4 executor gate; its distinct proof/limits are in ADR-0013.

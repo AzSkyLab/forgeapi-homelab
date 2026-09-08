@@ -4,6 +4,8 @@
 
 ## Context
 
+**Implementation note, 2026-09-07:** bounded Go input/grant/dispatch rules exist in `internal/execution` and `internal/auth`; this is not the complete registry or a generalized PolicyEngine plugin framework. OPA/CEL remain unselected alternatives. [Current layout](../design/11-delivery.md#current-layout-and-dependencies).
+
 The first slice has a small governed catalog, fixed profile limits and object admission rules. No existing organizational Rego library has been supplied. Rules must be reproducible for recorded inputs and distinguish authorization from later cost exceptions.
 
 ## Decision and alternatives

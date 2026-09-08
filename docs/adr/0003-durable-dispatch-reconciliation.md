@@ -4,6 +4,8 @@
 
 ## Context
 
+**Implementation note, 2026-09-07:** atomic acceptance/outbox, persistent simulated effects, tickets and selected restart/replay cases are implemented. Cancellation/retry/history-budget and full failure/restore proof remain open. [Evidence overlay](../design/12-verification.md#current-evidence-overlay). The lab deployment outbox/recovery in ADR-0013 is a separate constrained path, not full provider conformance.
+
 SQL commits, Temporal starts/signals, provider submissions and object uploads are separate effects. Lost acknowledgements and worker restarts can otherwise lose accepted work or duplicate an untrusted workload.
 
 ## Decision

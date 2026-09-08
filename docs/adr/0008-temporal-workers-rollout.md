@@ -4,6 +4,8 @@
 
 ## Context
 
+**Implementation note, 2026-09-07:** local process-loss and version-gated legacy/new history replay have evidence; history/Continue-As-New and full retry/cancellation acceptance remain open. No ACA rollout, enterprise Temporal or scaler proof exists. The bounded native Terraform activity in [ADR-0013](0013-local-terraform-lab-exception.md) is not the short-activity compute path described below.
+
 ACA revisions/scale-in can terminate workers; external execution takes longer than a normal activity call. The deployed Temporal server, authorization and versioning capabilities are unknown. Backlog-only scaling does not account for all active work.
 
 ## Decision

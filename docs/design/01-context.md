@@ -2,6 +2,8 @@
 
 **Status:** proposed M0 design. [Index](README.md).
 
+**Implementation update, 2026-09-07:** local-first core is built with mandatory Entra and Docker Compose; compute remains synthetic. The separately authorized retained Key Vault and native certificate executor are a bounded exception to the original sequence, recorded in [ADR-0013](../adr/0013-local-terraform-lab-exception.md). The hosted/Batch diagram and milestone table below are the target architecture, not current deployment inventory. Full M1 acceptance remains open; see [evidence status](12-verification.md#current-evidence-overlay).
+
 The product is an internal Infrastructure Platform API for roughly 100 developers and their CI pipelines. The first supported operation is an isolated, temporary OCI execution. Later persistent stacks share identity, authorization, policy, durable dispatch, artifacts, and audit, while retaining a different lifecycle and state model.
 
 Recommend Go with chi, two independently deployable process types from one monorepo, PostgreSQL records/outbox, and Temporal orchestration. Host API and workers on VNet-integrated ACA; connect to the existing enterprise Temporal service on AKS through its approved mTLS pattern. The API does not run on that AKS cluster. Azure Batch is a candidate workload scheduler until experiments establish viability.
@@ -62,7 +64,7 @@ Keep one representative template and a minimal curl flow. Do not introduce AWS/G
 | Source Temporal hosting TBD | Existing self-hosted AKS service is a supplied fact; access and authorization are unverified |
 | “First technical gate” versus source Phase 3 | Batch is the first **live compute** decision gate, after the shared M1 foundation |
 | Persistent stacks versus disposable workloads | Separate aggregates and provider contracts; shared application services |
-| “No long-lived shared credentials” versus earlier absolute API-key ban | Combined prompt controls: no runtime API keys, client secrets, or PATs; approved short-lived tokens and Temporal certificates only |
+| “No long-lived shared credentials” versus earlier absolute API-key ban | Original target policy: no runtime API keys, client secrets or PATs. The later seven-day home-lab executor certificate is a separately approved exception in ADR-0013, not a hosted/work default |
 | “Build or pull” versus immutable-image admission | Proposed demo pulls an admitted entrypoint and pinned helper images; source-image builds are disabled in this template pending a separate admitted build policy |
 | Docker access versus host/identity isolation | Recommend trusted supervisor-run Compose with no untrusted Docker API; confirm representative features and prove launch/identity boundary in M2 |
 | Newly allocated versus reimaged workers | Fresh single-use VM, then removal; no reuse/reimage acceptance assumed |

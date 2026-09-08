@@ -1,8 +1,26 @@
 # 12. Ranked questions and verification register
 
-**Status:** all environment experiments **not run**. Owners below are proposed role owners, not confirmed assignments. [Index](README.md).
+**Status:** partial local/Entra evidence plus a completed separately authorized Key Vault/identity spike; full M1 and enterprise/live-compute gates remain open. Owners below are proposed role owners, not confirmed assignments. [Index](README.md).
 
 Documented support is recorded in [references](references.md); a linked product page is not environment evidence. Test result records must identify date, runner, exact versions/configuration, authorized target, inputs, command/procedure, output/evidence digests, actual outcome, outstanding cleanup and reviewer. No numeric acceptance target is invented from a product default.
+
+## Current evidence overlay
+
+As of 2026-09-07, the register below remains the **required scope**, not a claim that every experiment is unrun or complete. Detailed prior commands/results are in [progress](../progress.md); updating this table does not rerun them or substitute for human review.
+
+| Gate | Recorded evidence | Still open |
+| --- | --- | --- |
+| V01 — contract | Local Redocly/schema/example checks; actual compute and lab-deployment handler response tests | Enterprise guideline/profile and contract acceptance |
+| V02 — Entra | Real lab tenant setup, browser PKCE and single-user authenticated Docker walkthrough; automated token/current-grant/ownership denial tests | Work tenant/Mac; real second-user ownership/revocation and full connected matrix; app-only/WIF API caller proof |
+| V03 — Temporal | Pinned local development server, SDK and selected old/new history replay | Enterprise server/config, mTLS, namespace/operation isolation and rotation; local dev UI is not that boundary |
+| V04 — core recovery | Real PostgreSQL atomic/concurrent acceptance, worker kill/restart, persistent effect/late-delete and blocked-cleanup recovery; selected F/S cases | Cancellation-budget failure, retry classification, history/Continue-As-New, ambiguous Start/DB/result failure windows and complete required matrix |
+| V12 / S07 — telemetry | Local OTLP wire/collector traces, durable DB audit and redaction canaries | Retry/orphan metrics, full S07 corpus, enterprise exporter/residency and live-provider stages; no WORM/SIEM claim |
+| V20 — tooling | Git, AGENTS/CONTRIBUTING, Makefile, pinned Docker/Go dependencies and local CI definition exist | Human owners/CODEOWNERS, remote CI execution and actual Mac verification; Dev Container not implemented |
+| Lab exception — not V05/V06/V19 closure | One real vault create under original human identity, UAMI/SP RG role bootstrap and subsequent certificate-only ARM/Terraform reads; original recovery evidence retained | No SP create/apply proof, hosted MI/WIF, remote state, general repo execution or full uncertain-apply recovery; see ADR-0013 |
+| V05–V11, V13–V19 future gates | No broad hosting, Batch, isolation, restore, pricing, manager or general executor acceptance | Remain required only for their separately approved milestones; lab evidence does not close them |
+| V21/V22 — optional | Coordinator-only policy is active | No delegated-agent configuration or ACA autoscaling evidence; neither blocks current local coding |
+
+**Next authorized coding task:** cancellation/retry/history-budget acceptance from [handoff](../handoff.md). No provisioning or paid experiment is authorized by the register. Human architecture/security acceptance remains separate from implemented behavior and assistant-run checks.
 
 ## Ranked decisions and experiments
 
@@ -29,7 +47,7 @@ Priority P0 blocks the indicated gate, not all independent work. P1 is required 
 | V17 / P2 / M4+ price gate | Which estimator/rate source/deployment and policy-compatible auth? Default evaluate Infracost + EA/MCA price books before custom integration | FinOps + vendor/security owner | Representative resource/plan/rate mapping, coverage/currency/tier/effective-date tests, billing permissions, vendor licensing/auth/feature confirmation and observed egress. No key exception assumed; approved rate snapshot/manual bound review in controlled scope if needed |
 | V18 / P2 / M5 decisions | Supported manager lookup/sync and CI sponsor/delegation; Teams/email authority? Default approved directory feed | Directory + budget owners + identity team | Graph tenant query/permission test if chosen, stale/missing manager/delegate/self-approval/expiry/revocation cases, authenticated API decisions and deduplicated signal/notification delivery. No background managed-identity manager lookup assumed |
 | V19 / P2 / M4 executor | Which exact Terraform/provider/module/Go library versions, plan validity and RBAC delegation? Default single pinned Terraform, immutable bundles and refreshed plans | Platform/pattern owners + both engineers | Offline init, complete transitive digests, Entra backend lock tests, sensitive/write-only resource proof, uncertain apply/state-write recovery and plan/approval invalidation; no OpenTofu equivalence claim |
-| V20 / P0 / M1.1 repository and tests | Required Git/owners, development instructions and layered test tooling? Recommend working agreement's task/test sections | Both engineers | Restore usable Git without erasing existing data; assign real CODEOWNERS; create concise AGENTS.md/contributing guide/shared commands after approval; pin and reproduce Go/Temporal/PostgreSQL/OpenAPI checks in Dev Container/CI. Missing prerequisites block affected collaboration/tooling work; no fabricated owners or successful skips |
+| V20 / P0 / M1.1 repository and tests | Required Git/owners, development instructions and layered test tooling? Use working agreement's current commands | Both engineers | Git/instructions/commands/pins/local checks now exist; see overlay. Assign actual owners, verify work Mac and remote CI; Dev Container is optional future setup, not present tooling. Missing prerequisites block affected work, not all local development; no fabricated owners or successful skips |
 
 “Signed” or “approved” evidence in the table describes a future requirement, not a signature already supplied. Each gate records accept/reject/pending against actual results and names any accepted exceptions; security/auth denials cannot be overruled by cost approval.
 

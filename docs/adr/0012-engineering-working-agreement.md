@@ -4,15 +4,17 @@
 
 ## Context
 
+**Implementation note, 2026-09-07:** AGENTS/CONTRIBUTING, handoff/progress, Makefile, Docker tooling and a local CI definition exist. Actual tests use Go/httptest, Temporal testsuite/replay, **Compose** PostgreSQL/Temporal and JSON Schema response validation, not Testcontainers. [Current agreement and commands](../design/working-agreement.md). Explicit delegation is required; no helpers are activated by this ADR.
+
 The original delivery plan identified two workstreams and acceptance scenarios but did not specify how the engineers and Codex coordinate, how optional agents own changes, or which framework produces the evidence. Those decisions affect reproducibility, review effort and safe parallel work.
 
 ## Decision
 
 Recommend one accountable human task owner and one coordinating Codex session. Use bounded investigator/builder/reviewer helpers when authorized and useful, with explicit file ownership and one integration owner. Create concise root AGENTS.md and human contributing instructions during approved M1.1; keep current task state and acceptance evidence durable. Routine approved milestone work continues without repeated per-file approval.
 
-Use Go's native tests/HTTP tools, Temporal test suite and replay, Testcontainers PostgreSQL, a pinned real Temporal integration fixture and shared provider conformance scenarios. Reuse the M0 Redocly/schema checks; evaluate/pin an OpenAPI 3.1.1-capable Go validation library and enterprise rules against this exact contract in M1. Separate local fixture, connected enterprise and live cloud evidence in CI and milestone acceptance.
+Use Go's native tests/HTTP tools, Temporal test suite/replay and pinned Compose PostgreSQL/Temporal fixtures. Testcontainers was an M0 proposal, not the selected harness. Reuse Redocly/schema checks and the selected Go JSON Schema validator for actual responses; enterprise rules remain unapproved. Shared live-provider conformance is future work. Separate local fixture, connected enterprise and live cloud evidence in CI and milestone acceptance.
 
-This agreement was explicitly requested in the conversation. Keep task ownership and required repository/test setup in V20; optional development-agent/client preferences are V21 and do not block M1. M0 now has a versioned documentation checker and Redocly 2.51.2 profile; application harness/Go library selection still belongs to M1. No delegation is activated by this revision.
+This agreement was explicitly requested in the conversation. V20 now has partial local tooling evidence; human owners, remote CI and actual Mac proof remain open. Optional development-agent/client preferences are V21 and do not block M1. Redocly 2.51.2 and the application harness have separate evidence in the design verification register. No delegation is activated by this revision.
 
 ## Alternatives
 

@@ -21,16 +21,19 @@ import (
 const input = `{"application_id":"software-factory","environment":"development","template_id":"pr-validation-v1","template_version":"1.0.0","input_artifact_refs":["source-01"]}`
 
 type demo struct {
-	base   string
-	token  string
-	client http.Client
-	ctx    context.Context
+	base               string
+	token              string
+	client             http.Client
+	ctx                context.Context
+	keyVaultRequestKey string
 }
 
 func main() {
 	base := flag.String("url", "http://localhost:8080", "local API URL")
 	envFile := flag.String("env-file", ".env", "local Entra identifiers; never a client secret")
 	printURL := flag.Bool("print-login-url", false, "print the browser sign-in URL instead of opening it")
+	keyVault := flag.Bool("key-vault", false, "LIVE: request the approved empty-vault Terraform plan, then require typed saved-plan approval")
+	keyVaultRequestKey := flag.String("key-vault-request-key", "key-vault-create-v1", "stable create key; change only after reviewed rejected-attempt recovery")
 	flag.Parse()
 	if !localAPIURL(*base) {
 		fmt.Fprintln(os.Stderr, "DEMO FAILED: URL must be a loopback HTTP origin")
@@ -43,10 +46,19 @@ func main() {
 		fmt.Fprintln(os.Stderr, "DEMO FAILED:", err)
 		os.Exit(1)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	duration := 90 * time.Second
+	if *keyVault {
+		duration = 25 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
 	defer cancel()
 	d := demo{base: *base, token: token, client: http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, ctx: ctx}
-	if err := d.run(); err != nil {
+	d.keyVaultRequestKey = *keyVaultRequestKey
+	walkthrough := d.run
+	if *keyVault {
+		walkthrough = d.keyVault
+	}
+	if err := walkthrough(); err != nil {
 		fmt.Fprintln(os.Stderr, "DEMO FAILED:", err)
 		os.Exit(1)
 	}
@@ -108,9 +120,11 @@ func (d *demo) wait(id, want string) error {
 			last = e.State
 		}
 		if e.State == want {
-			return nil
+			if !execution.Terminal(want) || (e.CleanupState == "succeeded" && (want != "succeeded" || e.ResultComplete)) {
+				return nil
+			}
 		}
-		if execution.Terminal(e.State) {
+		if execution.Terminal(e.State) && e.State != want {
 			return fmt.Errorf("wanted %s, got %s", want, e.State)
 		}
 		select {

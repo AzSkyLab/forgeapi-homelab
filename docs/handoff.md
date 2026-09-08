@@ -1,6 +1,10 @@
 # Start here — next coding session
 
-**Goal:** finish the core API before infrastructure. Normal Docker startup requires Entra; compute stays simulated. No paid Azure resources, deployments, static Azure credentials, commits or pushes are authorized by this handoff.
+**Goal:** continue local core acceptance. Normal Docker startup requires Entra; compute stays simulated. The separately authorized one-empty-Key-Vault spike and lab identity setup are complete; see [Key Vault walkthrough](key-vault-demo.md). The approved seven-day home-lab executor certificate is a limited credential exception, not a work default. No additional infrastructure, paid dependencies, credentials, commits or pushes are authorized.
+
+**Key Vault spike complete:** deployment `dep_000b66b69f5db372949a27ae80b806e4` reached `succeeded` through the real API/Temporal/Terraform path; independent Azure readback matched. The vault/state remain; the native Key Vault worker is stopped. Do not provision again or retry the preserved rejected attempt. Use the runbook's completed-demo replay command, then continue the next local acceptance task below.
+
+**Identity follow-up complete for the lab:** the engineer explicitly approved a seven-day certificate. The native worker and Terraform now use a dedicated lab service principal, with no human CLI fallback; actual ARM/Terraform reads passed. `make keyvault-identity-check` repeats that read-only proof. Certificate expiry: September 14, 2026, 21:18:36 EDT. The native infrastructure worker remains stopped; the existing vault and original evidence are preserved. The UAMI/RG role remain available but are not used by the lab certificate path. Read [identity setup and limits](terraform-identity.md). ACA managed-identity execution/hosted connectivity are not implemented; they require a separately scoped work-environment integration. Do not create another vault, revive old human-bound plans or introduce automatic credential fallback.
 
 ## Five-minute orientation
 
@@ -9,7 +13,7 @@
 - [Entra setup](entra-local.md): exact one-time identity configuration; no secret.
 - [Progress](progress.md): evidence and limitations. Do not confuse old fixture-demo proof with connected Entra proof.
 - `sh scripts/verify-local.sh`: after tenant setup, check Docker, run tests, start stack and sign in for the demo. Mac/Linux; no host Go.
-- `make test-docker`: credentials-free unit/race tests. `make test-integration`: separate ephemeral PostgreSQL tests.
+- `make test-docker`: credentials-free unit/race/contract/OTLP tests. `make test-core`: real ephemeral PostgreSQL/Temporal, worker kill/restart, old/new history replay and cleanup recovery. `make vuln-docker`: vulnerability gate.
 
 ## Code map — read only the path needed
 
@@ -19,17 +23,22 @@
 | Auth and current grants | `internal/auth/entra.go`, `keys.go`, `policy.go`, `*_test.go` |
 | HTTP authorization/ETags/cursors | `internal/httpapi/api.go`, `api_test.go`, `entra_test.go` |
 | Atomic acceptance/idempotency/outbox | `internal/store/postgres.go`, tagged `postgres_integration_test.go` |
-| Fake workflow and dispatch | `internal/orchestration/workflow.go`, `dispatch.go`, `workflow_test.go` |
+| Workflow, dispatch and recovery | `internal/orchestration/core_workflow.go`, `core.go`, `dispatch.go`, `recovery.go`, `core_integration_test.go`; `workflow.go` preserves legacy replay |
+| Versioned migrations / durable simulated effects | `internal/store/migrate.go`, `migrations/`, `simulation.go`, `core_integration_test.go` |
+| Local traces and durable audit | `internal/telemetry/`, `config/collector.yaml`, `internal/store/postgres.go` |
 | Required Entra startup | `internal/local/config.go`, `cmd/forgeapi/main.go`, `compose.yaml` |
+| One-target Terraform spike | `internal/deployment/`, `internal/httpapi/deployment.go`, `internal/store/deployment.go`, `internal/keyvaultrunner/`, `cmd/keyvault-worker/`, `patterns/key-vault/` |
 | Secretless meeting walkthrough | `cmd/demo/main.go`, `login.go`, `scripts/demo.sh` |
 
 ## Next work, one task at a time
 
 1. **Environment setup:** the single-user real Entra → Docker walkthrough passed on Linux. For the Mac/new approved tenant, follow [work-setup.md](work-setup.md). Second-user ownership denial/revocation with real tokens remains a separate unverified gate. Record only sanitized results.
-2. **Bounded event long-polling:** own `internal/httpapi/api.go` and focused HTTP tests; consult `docs/design/04-api.md` pagination section. Accept only a bounded wait, return new events or the unchanged tail cursor on timeout, honor cancellation, reauthorize before delivery, and preserve existing non-wait behavior. No new endpoint/provider/queue.
-3. **Recovery/dispatch policy:** own orchestration/store tests and corresponding implementation; choose one crash/revocation case from `docs/design/05-temporal-recovery.md`. Prove it with a failing test before changing behavior. Live compute remains disabled.
+2. **Next authorized local coding task:** cancellation-budget failures, permanent/transient retry classification and history-budget/Continue-As-New behavior in `internal/orchestration/core_workflow.go`, `core.go`, `recovery.go` and focused store/Temporal tests. Read only relevant recovery requirements in `docs/design/05-temporal-recovery.md`. Preserve original deadlines, cancellation intent, outcome immutability and legacy replay.
+3. **Remaining local gates:** ambiguous Start response and sustained DB/result outages, retry/orphan metrics, retention rules and the remaining HTTP/security matrix. See the latest section of `docs/progress.md`; passing the current suite is not the entire F01–F16/F18/S07 matrix.
 
-Catalog pagination, content negotiation/tracestate, migrations, audit/telemetry, CI/scanning, workflow replay and connected Temporal evidence remain in the core backlog. Full M1 is not complete. Group/app-owner policy, dispatch-time revocation and production security need separate work.
+**Future identity integration, not current authorization:** implement and verify the ACA worker's managed-identity adapter and hosted PostgreSQL/Temporal connectivity only after separate scope and approval. This does not replace the next local coding task or authorize deployment.
+
+Long polling, catalog pagination, media negotiation, current dispatch policy, migrations, durable audit/local OTLP, CI/scanning and old/new workflow replay are implemented. Valid tracestate is parsed but discarded (no approved local vendor list). Full M1 is not complete; group/app-owner policy and enterprise Temporal/security evidence remain open. Use `make up` for upgrades: it stops writers before migration and preserves data. Do not run pre-migration plaintext-idempotency writers against the upgraded database.
 
 ## Paste into the next coding session
 

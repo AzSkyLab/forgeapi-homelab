@@ -6,4 +6,4 @@ rules:
   struct: error
   no-invalid-media-type-examples: error
   info-license: off # No publication license has been granted for this internal design.
-  no-server-example.com: off # Documentation host; there is no deployed API yet.
+  no-server-example.com: off # Portable target uses a placeholder; lab contract names loopback only.

@@ -2,6 +2,8 @@
 
 **Status:** proposed control design, not a compliance attestation. [Index](README.md).
 
+**Current evidence/limits:** mandatory Entra human sign-in, current-grant denial tests, local audit/OTLP redaction and certificate-only executor reads have recorded evidence. Local PostgreSQL uses development credentials; Temporal dev/UI has no enterprise TLS/authorization boundary; audit is not WORM. Hosted identity/DB roles, cross-store restore, retention pruning, full S07 metrics/security and production developer isolation remain open. The approved seven-day lab certificate is a private-key credential, not secretless production isolation; its holder can directly use its RG rights. [Identity ADR](../adr/0013-local-terraform-lab-exception.md), [verification status](12-verification.md#current-evidence-overlay).
+
 ## Threat model and evidence owners
 
 Treat all submitted repository code, including internal code, as untrusted. Control-plane administrators, image publishers, data readers and approvers are distinct responsibilities even when two engineers initially operate several roles. Review separation with security before live use.
@@ -73,7 +75,7 @@ Restore to a new endpoint; reestablish Entra roles/private DNS/TLS/keys and comp
 
 ## Minimum telemetry and audit schema
 
-Use OpenTelemetry SDK instrumentation in API, control/provider activities, adapter and host agent, with one OTLP export path to an approved POC collector/backend. W3C `traceparent`/`tracestate` propagate through allowlisted Temporal headers; link new short spans after durable waits. Execution ID and workflow/activity IDs belong in logs/traces/audit, not metrics labels. Drop arbitrary baggage, provider resource IDs and sensitive request attributes from public telemetry; restricted operator telemetry has separate access.
+Use OpenTelemetry SDK instrumentation in API, control/provider activities, adapter and host agent, with one OTLP export path to an approved POC collector/backend. Target behavior propagates validated W3C context through allowlisted Temporal headers and links short spans after durable waits. Current local code propagates `traceparent` but parses and discards `tracestate` because no vendor list is approved; it exports only to the local collector. Host-agent/live-provider telemetry remains future work. Execution ID and workflow/activity IDs belong in logs/traces/audit, not metrics labels. Drop arbitrary baggage, provider resource IDs and sensitive request attributes from public telemetry; restricted operator telemetry has separate access.
 
 One export platform can have separate authenticated ingestion pipelines. Untrusted workload stdout/stderr cannot emit authoritative audit/lifecycle events or select another execution's correlation attributes. The runtime/host collector stamps assignment-derived identity and ingestion time, preserves source trust labels and rejects forged control events. Provider observations and platform decisions alone establish completion/cleanup. S07 injects forged execution IDs, success/cleanup spans, ANSI/control characters and secret canaries. Include Azure Activity Log for management-plane mutation evidence, Batch task/node observations for workload evidence, and application audit for authorization; none substitutes for the other.
 

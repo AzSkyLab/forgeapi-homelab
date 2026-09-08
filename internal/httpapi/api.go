@@ -17,41 +17,55 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"forgeapi/internal/auth"
+	"forgeapi/internal/deployment"
 	"forgeapi/internal/execution"
 	"forgeapi/internal/store"
+	"forgeapi/internal/telemetry"
 	"github.com/go-chi/chi/v5"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 type Repository interface {
 	Get(context.Context, string) (execution.Record, error)
 	Submit(context.Context, string, string, string, string, execution.Spec) (store.Accepted, error)
 	Cancel(context.Context, string, string, string, string, string) (store.Accepted, error)
+	TemplateRevoked(context.Context) (bool, error)
 }
 
 type API struct {
-	Repo      Repository
-	BaseURL   string
-	CursorKey []byte
-	Auth      auth.Authenticator
+	Repo             Repository
+	BaseURL          string
+	CursorKey        []byte
+	Auth             auth.Authenticator
+	Deployments      DeploymentRepository
+	DeploymentTarget func() (deployment.Target, error)
+	waiters          atomic.Int64
 }
 type identityKey struct{}
 
 var keyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
-var flowPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+var flowPattern = regexp.MustCompile(`^[A-Za-z0-9/+_=-]{1,128}$`)
 var tracePattern = regexp.MustCompile(`^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$`)
 
 func (a *API) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(a.localBoundary)
+	r.Use(telemetry.HTTP)
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		a.json(w, 200, map[string]string{"status": "ok", "mode": "local-demo"})
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(a.authenticate)
 		r.Get("/identity-context", a.identity)
+		r.Get("/deployment-patterns", a.deploymentPatterns)
+		r.Post("/deployments", a.createDeployment)
+		r.Get("/deployments/{deployment_id}", a.getDeployment)
+		r.Post("/deployments/{deployment_id}/approvals", a.approveDeployment)
 		r.Get("/execution-templates", a.templates)
 		r.Post("/executions", a.submit)
 		r.Post("/execution-templates/{template_id}/executions", a.submit)
@@ -84,9 +98,13 @@ func (a *API) localBoundary(next http.Handler) http.Handler {
 			a.problem(w, r, 400, "invalid_request", "Invalid X-Flow-ID.")
 			return
 		}
+		if len(r.Header.Values("X-Flow-ID")) > 1 || len(r.Header.Values("traceparent")) > 1 {
+			a.problem(w, r, 400, "invalid_request", "Repeated correlation header.")
+			return
+		}
 		w.Header().Set("X-Flow-ID", flow)
-		// This binary is exclusively a trusted-laptop demo. Reject browser-origin calls
-		// and unexpected hosts; require a custom fixture header on every API operation.
+		// This binary is exclusively a loopback local environment. Protected routes
+		// additionally require Entra; host checks do not replace authentication.
 		host := r.Host
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h
@@ -104,17 +122,21 @@ func (a *API) localBoundary(next http.Handler) http.Handler {
 			a.problem(w, r, 400, "invalid_request", "Invalid traceparent.")
 			return
 		}
-		if r.Header.Get("tracestate") != "" {
-			a.problem(w, r, 400, "unsupported_demo_feature", "tracestate propagation is not implemented in this local slice.")
+		state := strings.Join(r.Header.Values("tracestate"), ",")
+		if _, err := oteltrace.ParseTraceState(state); err != nil || len(state) > 512 || (state != "" && trace == "") {
+			a.problem(w, r, 400, "invalid_request", "Invalid tracestate.")
 			return
 		}
-		next.ServeHTTP(w, r)
+		ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 func (a *API) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if a.Auth == nil {
+			w.Header().Set("Retry-After", "15")
 			a.problem(w, r, 503, "authentication_unavailable", "Authentication is not configured.")
 			return
 		}
@@ -129,11 +151,17 @@ func (a *API) authenticate(next http.Handler) http.Handler {
 			}
 			return
 		}
-		if accept := r.Header.Get("Accept"); accept != "" && accept != "application/json" && accept != "*/*" {
-			a.problem(w, r, 406, "unacceptable_representation", "This demo accepts application/json or */*.")
+		media := "application/json"
+		if strings.Contains(r.URL.Path, "/artifacts/") {
+			media = "application/octet-stream"
+		}
+		if !accepts(strings.Join(r.Header.Values("Accept"), ","), media) {
+			a.problem(w, r, 406, "unacceptable_representation", "No acceptable representation is available.")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, identity)))
+		ctx := context.WithValue(r.Context(), identityKey{}, identity)
+		ctx = execution.WithCorrelation(ctx, execution.Correlation{RequestID: w.Header().Get("X-Request-ID"), FlowID: w.Header().Get("X-Flow-ID"), TraceParent: r.Header.Get("traceparent"), PrincipalKind: identity.Kind})
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -155,8 +183,13 @@ func (a *API) templates(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, 403, "policy_denied", "Catalog permission required.")
 		return
 	}
-	if len(r.URL.Query()) != 0 {
-		a.problem(w, r, 400, "unsupported_demo_feature", "The local catalog contains one fixture and does not paginate yet.")
+	start, end, _, page, ok := a.pagination(w, r, 1)
+	if !ok {
+		return
+	}
+	revoked, err := a.Repo.TemplateRevoked(r.Context())
+	if err != nil {
+		a.storeError(w, r, err)
 		return
 	}
 	defaults := execution.Defaults()
@@ -174,12 +207,13 @@ func (a *API) templates(w http.ResponseWriter, r *http.Request) {
 		properties[k] = map[string]any{"const": v}
 	}
 	properties["timeout_seconds"] = map[string]any{"type": "integer", "minimum": 1, "maximum": 1800}
-	a.json(w, 200, map[string]any{"items": []any{map[string]any{"template_id": execution.TemplateID, "version": execution.TemplateVersion, "description": "LOCAL SIMULATION: no image is pulled, no source tests run; publishes a synthetic sbom artifact.", "allowed_overrides": []string{"compute_profile", "timeout_seconds"}, "defaults": values, "revoked": false,
-		"input_schema": map[string]any{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "required": []string{"application_id", "environment", "template_id", "template_version", "input_artifact_refs"}, "additionalProperties": false, "properties": properties}}}, "page": map[string]any{}})
+	items := []any{map[string]any{"template_id": execution.TemplateID, "version": execution.TemplateVersion, "description": "LOCAL SIMULATION: no image is pulled, no source tests run; publishes a synthetic sbom artifact.", "allowed_overrides": []string{"compute_profile", "timeout_seconds"}, "defaults": values, "revoked": revoked,
+		"input_schema": map[string]any{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "required": []string{"application_id", "environment", "template_id", "template_version", "input_artifact_refs"}, "additionalProperties": false, "properties": properties}}}
+	a.json(w, 200, map[string]any{"items": items[start:end], "page": page})
 }
 
 func (a *API) body(w http.ResponseWriter, r *http.Request, optional bool) ([]byte, bool) {
-	if !keyPattern.MatchString(r.Header.Get("Idempotency-Key")) {
+	if len(r.Header.Values("Idempotency-Key")) != 1 || !keyPattern.MatchString(r.Header.Get("Idempotency-Key")) {
 		a.problem(w, r, 400, "invalid_request", "Idempotency-Key must contain 16–128 letters, digits, underscores, or hyphens.")
 		return nil, false
 	}
@@ -254,7 +288,7 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	}
 	etag := fmt.Sprintf(`"%d"`, item.Execution.Revision)
 	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
+	if matchesETag(strings.Join(r.Header.Values("If-None-Match"), ","), etag) {
 		w.WriteHeader(304)
 		return
 	}
@@ -301,17 +335,24 @@ func (a *API) encode(c cursor) string {
 }
 
 func (a *API) pagination(w http.ResponseWriter, r *http.Request, total int) (start, end int, tail string, page map[string]string, ok bool) {
-	q := r.URL.Query()
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		a.problem(w, r, 400, "invalid_request", "Malformed query.")
+		return
+	}
 	limit := 50
 	for key, values := range q {
-		if len(values) != 1 || (key != "limit" && key != "cursor" && key != "wait_seconds") {
+		if len(values) != 1 || values[0] == "" || (key != "limit" && key != "cursor" && !(key == "wait_seconds" && strings.HasSuffix(r.URL.Path, "/events"))) {
 			a.problem(w, r, 400, "invalid_request", "Unsupported or repeated query parameter.")
 			return
 		}
 	}
-	if q.Has("wait_seconds") && q.Get("wait_seconds") != "0" {
-		a.problem(w, r, 400, "unsupported_demo_feature", "Long polling is not implemented yet; poll with the returned cursor.")
-		return
+	if q.Has("wait_seconds") {
+		wait, err := strconv.Atoi(q.Get("wait_seconds"))
+		if err != nil || wait < 0 || wait > 25 {
+			a.problem(w, r, 400, "invalid_request", "wait_seconds must be 0–25.")
+			return
+		}
 	}
 	if q.Has("limit") {
 		n, err := strconv.Atoi(q.Get("limit"))
@@ -363,6 +404,47 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	wait, _ := strconv.Atoi(r.URL.Query().Get("wait_seconds"))
+	if wait > 0 && start == end {
+		if a.waiters.Add(1) > 64 {
+			a.waiters.Add(-1)
+			w.Header().Set("Retry-After", "1")
+			a.problem(w, r, 429, "rate_limited", "Local long-poll capacity is full.")
+			return
+		}
+		defer a.waiters.Add(-1)
+		timer := time.NewTimer(time.Duration(wait) * time.Second)
+		defer timer.Stop()
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			expired := false
+			select {
+			case <-r.Context().Done():
+				return
+			case <-timer.C:
+				expired = true
+			case <-ticker.C:
+			}
+			// Re-run token and current-grant validation, including on an empty
+			// timeout. A connection is never a lease on previously granted access.
+			var checked bool
+			a.authenticate(http.HandlerFunc(func(w http.ResponseWriter, refreshed *http.Request) {
+				r = refreshed
+				item, checked = a.authorized(w, r, false)
+			})).ServeHTTP(w, r)
+			if !checked {
+				return
+			}
+			if expired || len(item.Events) > start {
+				break
+			}
+		}
+		start, end, tail, page, ok = a.pagination(w, r, len(item.Events))
+		if !ok {
+			return
+		}
+	}
 	a.json(w, 200, map[string]any{"items": item.Events[start:end], "cursor": tail, "page": page})
 }
 func (a *API) logs(w http.ResponseWriter, r *http.Request) {
@@ -374,7 +456,37 @@ func (a *API) logs(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	a.json(w, 200, map[string]any{"items": item.Logs[start:end], "cursor": tail, "page": page, "truncated": false})
+	logs := make([]execution.Log, 0, end-start)
+	truncated, size := false, 0
+	for _, line := range item.Logs[start:end] {
+		if len(line.Text) > 16384 {
+			line.Text = line.Text[:16384]
+			for !utf8.ValidString(line.Text) {
+				line.Text = line.Text[:len(line.Text)-1]
+			}
+			truncated = true
+		}
+		b, _ := json.Marshal(line)
+		// Reserve 8 KiB for the envelope, signed cursor and continuation URL.
+		if size+len(b)+1 > 248*1024 {
+			break
+		}
+		logs = append(logs, line)
+		size += len(b) + 1
+	}
+	if start+len(logs) < end {
+		q := r.URL.Query()
+		q.Set("limit", strconv.Itoa(len(logs)))
+		copyRequest := r.Clone(r.Context())
+		copyURL := *r.URL
+		copyURL.RawQuery = q.Encode()
+		copyRequest.URL = &copyURL
+		_, _, tail, page, ok = a.pagination(w, copyRequest, len(item.Logs))
+		if !ok {
+			return
+		}
+	}
+	a.json(w, 200, map[string]any{"items": logs, "cursor": tail, "page": page, "truncated": truncated})
 }
 func (a *API) results(w http.ResponseWriter, r *http.Request) {
 	item, ok := a.authorized(w, r, true)
@@ -396,7 +508,12 @@ func (a *API) artifact(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, 410, "artifact_expired", "Artifact has expired.")
 		return
 	}
-	w.Header().Set("Content-Type", f.MediaType)
+	if len(item.ArtifactData) != f.SizeBytes || fmt.Sprintf("sha256:%x", sha256.Sum256(item.ArtifactData)) != f.Digest {
+		w.Header().Set("Retry-After", "1")
+		a.problem(w, r, 503, "artifact_integrity_unavailable", "Artifact integrity could not be verified.")
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="simulated-sbom.json"`)
 	w.Header().Set("Content-Length", strconv.Itoa(len(item.ArtifactData)))
 	w.Header().Set("Accept-Ranges", "none")
@@ -406,6 +523,13 @@ func (a *API) artifact(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) accept(w http.ResponseWriter, v store.Accepted) {
 	w.Header().Set("Location", v.Location)
+	w.Header().Set("Retry-After", "1")
+	var accepted struct {
+		Revision int64 `json:"revision"`
+	}
+	if json.Unmarshal(v.Body, &accepted) == nil && accepted.Revision > 0 {
+		w.Header().Set("ETag", fmt.Sprintf(`"%d"`, accepted.Revision))
+	}
 	a.json(w, 202, v.Body)
 }
 func (a *API) json(w http.ResponseWriter, status int, v any) {
@@ -414,12 +538,21 @@ func (a *API) json(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func (a *API) problem(w http.ResponseWriter, r *http.Request, status int, code, detail string) {
+	oteltrace.SpanFromContext(r.Context()).AddEvent("request." + code)
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"type": "urn:forgeapi:problem:" + code, "title": http.StatusText(status), "status": status, "detail": detail, "instance": "urn:forgeapi:request:" + w.Header().Get("X-Request-ID"), "code": code, "request_id": w.Header().Get("X-Request-ID")})
+	_ = json.NewEncoder(w).Encode(map[string]any{"type": strings.TrimRight(a.BaseURL, "/") + "/problems/" + code, "title": http.StatusText(status), "status": status, "detail": detail, "instance": "urn:forgeapi:request:" + w.Header().Get("X-Request-ID"), "code": code, "request_id": w.Header().Get("X-Request-ID")})
 }
 func (a *API) storeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, store.ErrCallerCapacity):
+		w.Header().Set("Retry-After", "5")
+		a.problem(w, r, 429, "admission_limited", "Caller active-execution limit reached. Retry with the same key.")
+	case errors.Is(err, store.ErrServiceCapacity):
+		w.Header().Set("Retry-After", "5")
+		a.problem(w, r, 503, "admission_unavailable", "Local execution or dispatch capacity is full. Retry with the same key.")
+	case errors.Is(err, store.ErrTemplateRevoked):
+		a.problem(w, r, 403, "template_revoked", "This template version is revoked.")
 	case errors.Is(err, store.ErrNotFound):
 		a.problem(w, r, 404, "not_found", "Resource not found.")
 	case errors.Is(err, store.ErrConflict):

@@ -4,6 +4,8 @@
 
 ## Context
 
+**Implementation note, 2026-09-07:** Go/chi and separate local API/worker roles run via Compose. ACA/runtime-role deployment remains future. The native lab Terraform worker is a separately scoped exception in [ADR-0013](0013-local-terraform-lab-exception.md), not hosted acceptance.
+
 Two engineers need shared platform concerns and a working first capability. Temporal already exists on AKS, while the API must run elsewhere. Workload VMs and Temporal activity workers have different trust and operational requirements.
 
 ## Decision

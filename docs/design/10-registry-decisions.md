@@ -2,6 +2,8 @@
 
 **Status:** proposed. [Index](README.md).
 
+**Implementation boundary:** current local grants are a bounded principal/application/environment model, not this complete BU/team/classification registry. The lab deployment target is one ignored server-owned binding, not a multi-target registry. Its vault/UAMI/SP do not establish the enterprise topology below. [ADR-0013](../adr/0013-local-terraform-lab-exception.md) records the exception and evidence.
+
 ## Registration model
 
 Do not equate a BU with one subscription, one application or one environment. Model registrations as explicit relationships and versioned deployment targets.
@@ -64,6 +66,7 @@ All ADRs are **Proposed**, including choices strongly directed by the prompt. No
 | [0010](../adr/0010-targets-and-vaults.md) | Typed grants/primary target, migration and app vault boundaries | V05/V06/V10 | M1 registry model; defer actual target/vault approval to owners; **Pending** |
 | [0011](../adr/0011-future-pricing-governance.md) | M2 experiment ceiling; later budget/pricing/approval model | V11/V17–V19 | M2 limits; defer M4+ feature acceptance; **Pending** |
 | [0012](../adr/0012-engineering-working-agreement.md) | Requested collaboration/tests; optional agents | V01/V04/V20; optional agents V21 | Required M1 task/test agreement; agents separate; **Pending** |
+| [0013](../adr/0013-local-terraform-lab-exception.md) | Local-first core, completed single-vault spike and approved short-lived executor certificate | Scoped lab evidence in progress; enterprise V03/V06/V19 remain open | Engineer authorized the operations; ADR review and broader architecture acceptance **Pending** |
 
 When accepting an ADR, record both engineers' decision/date and conditions, and link the package revision. A conditional ADR cannot turn an unrun security experiment into acceptance. Supersede ADRs with evidence rather than silently rewriting accepted history.
 

@@ -2,6 +2,8 @@
 
 A Go API for requesting and tracking asynchronous jobs. **Entra sign-in is required.** The API, PostgreSQL, Temporal and worker run locally in Docker; compute is simulated. No Azure hosting or paid resources are needed for this local slice.
 
+**Separately authorized live spike:** [one empty Standard Key Vault through the API and Terraform](docs/key-vault-demo.md). The trusted native worker now uses a [dedicated lab service principal and seven-day certificate](docs/terraform-identity.md), with no human CLI fallback or credentials in Docker. Exact saved-plan approval is required. `make keyvault-identity-check` safely verifies actual executor access against the existing vault without applying anything. This is not general repository execution or shared deployment.
+
 Read the [TLDR and roadmap](docs/TLDR.md). For tomorrow's machine/tenant setup, give the assistant [these exact instructions](docs/work-setup.md). For co-development, start with the short [handoff](docs/handoff.md); the larger design package is reference material, not required onboarding.
 
 ## Set up and run
@@ -10,7 +12,7 @@ Read the [TLDR and roadmap](docs/TLDR.md). For tomorrow's machine/tenant setup, 
 2. Start Docker, then run:
 
 ```sh
-docker compose up --build -d --wait
+make up
 sh scripts/demo.sh
 ```
 
@@ -18,7 +20,7 @@ The helper opens browser sign-in using Microsoft's library and PKCE. It runs the
 
 API liveness: <http://localhost:8080/healthz> · Temporal UI: <http://localhost:8233>
 
-After configuration, rehearse everything with **`sh scripts/verify-local.sh`** (or `make verify-local`): Docker checks → unit/race tests → isolated PostgreSQL tests → startup → browser sign-in and demo. No cloud objects are created by these commands.
+After configuration, rehearse with **`sh scripts/verify-local.sh`**: Docker checks → unit/race/contract tests → real PostgreSQL/Temporal recovery tests → startup → browser sign-in and demo. No cloud objects are created by these commands. `make up` stops API/worker for versioned migrations; it preserves both data volumes. Without Make, run `docker compose stop api worker` before `docker compose up --build -d --wait`.
 
 ### On your Mac
 
@@ -33,9 +35,11 @@ Prerequisites: Docker Engine 28+, Compose v2.20+ or later, ports 8080/54329/7233
 ```sh
 docker compose -f compose.test.yaml run --build --rm --no-deps tests
 make test-integration
+make test-core
+make vuln-docker
 ```
 
-The separate test project runs only automated tests and an optional ephemeral PostgreSQL instance. It does not start an API with selectable identities. Without Make:
+The separate test project contains ephemeral PostgreSQL/Temporal and test processes, with no host ports or tenant configuration. `test-core` kills/restarts a real worker, verifies independent cleanup/delivery recovery and replays old/new Temporal histories. `vuln-docker` scans reachable Go vulnerabilities. It does not start an API with selectable identities. Without Make, the PostgreSQL-only check is:
 
 ```sh
 docker compose -f compose.test.yaml up -d --wait postgres
@@ -57,6 +61,7 @@ Auth tests generate synthetic signing keys and replace only the external JWKS re
 
 ```sh
 docker compose logs --tail=100 api worker
+docker compose logs --tail=100 collector
 docker compose down
 docker compose -f compose.test.yaml down
 ```
@@ -69,4 +74,6 @@ This is an **M1 local development increment**, not full M1 acceptance or a deplo
 
 PostgreSQL stores API records/outbox/results. Temporal's development server stores its own history in a SQLite-backed named volume, not the application's PostgreSQL. Keep both volumes. The project bridge permits outbound networking; it is not a workload sandbox. PostgreSQL and Temporal's local development interfaces do **not** gain Entra protection from the HTTP API's auth layer.
 
-No production HA, cross-store restore guarantee, live provider or Terraform is implemented. No static Azure API key/client secret is used. Managed identities/WIF are the direction for future workloads, not credentials already available in plain local Docker. See [implementation evidence and remaining work](docs/progress.md) and [the meeting walkthrough](docs/demo.md).
+No production HA, cross-store restore guarantee, live compute provider or general-purpose Terraform execution is implemented. The separate one-vault Terraform spike has passed live API-to-Azure verification. No static Azure API key/client secret is used. Managed identities/WIF are the direction for future workloads, not credentials already available in plain local Docker. See [implementation evidence and remaining work](docs/progress.md) and [the meeting walkthrough](docs/demo.md).
+
+Local limits: 10 outstanding executions per caller, 100 total/backlogged intents; unknown/unfinished cleanup holds its slot. Replays consume no new slot. Event waits are 0–25 seconds with 64 concurrent waiters. Logs are bounded to 256 KiB/page. The private readiness/liveness listener is `127.0.0.1:8081` inside the API container, not published on the host. OTLP traces go only to the local collector, without bodies/tokens/baggage; database audit events survive process restarts. CI is defined in `.github/workflows/core.yml` but is not a remotely verified GitHub run until pushed by a human.

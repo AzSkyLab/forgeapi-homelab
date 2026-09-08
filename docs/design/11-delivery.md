@@ -1,41 +1,39 @@
 # 11. Monorepo and delivery plan
 
-**Status:** implementation plan for review; no scaffolding created. [Index](README.md).
+**Status:** current local layout plus target delivery plan; local core implemented, full M1 acceptance pending. [Index](README.md). The completed one-vault/identity spike is recorded separately in [ADR-0013](../adr/0013-local-terraform-lab-exception.md), not completion of M2/M4.
 
 The [working agreement](working-agreement.md) defines how the requesting engineer, manager and Codex share task ownership, use bounded specialist agents, preserve session state, and review changes. It also names the proposed test frameworks and developer commands. Read it alongside the M1 work packages below; it supplements the runtime architecture with the engineering workflow.
 
-## Proposed layout and dependencies
+## Current layout and dependencies
 
 ```text
-cmd/api/                         public API or separately deployed private runtime role; private probes
-cmd/worker/                      role-configured lifecycle/provider workers and dispatcher
-internal/execution/              aggregate, admission and lifecycle application services
-internal/catalog/                immutable template/profile schemas and publication validation
-internal/identity/               Entra verification, grants and ownership resolution
-internal/policy/                 deterministic Go PolicyEngine implementation
-internal/workflows/              portable deterministic Temporal workflow
-internal/adapters/postgres/      repositories, outbox, leases, attempts, migrations
-internal/adapters/temporal/      client, activities, context propagation
-internal/adapters/fake/          durable fake external state and failure injection
-internal/adapters/batch/         added only after successful M2 gate
-internal/artifacts/              manifests, authorization and transfer port
-internal/audit/                  structured evidence and export outbox
-internal/telemetry/              OTLP, safe attributes and middleware
-api/openapi.yaml                 approved contract copied from design after signoff
-migrations/                     numbered reviewed SQL migrations
-tests/contract/                  same required provider conformance suite
-tests/integration/               real DB/Temporal crash and restore checks
-tests/acceptance/                authorized live scenarios and evidence manifests
-infra/platform/                 M2 approved foundation ownership only
-docs/design/, docs/adr/          review history and decisions
-.devcontainer/, .github/         introduced in M1
-AGENTS.md, CONTRIBUTING.md       approved agent rules and human development/review guide in M1
-Makefile                        shared local/CI check commands in M1
+cmd/forgeapi/                    API, synthetic worker, migration and health roles
+cmd/demo/                        browser PKCE and local/core or bounded vault walkthrough
+cmd/keyvault-worker/             native lab Terraform worker and read-only identity check
+internal/execution/              portable input/spec/lifecycle and bounded template defaults
+internal/auth/                   Entra verification, current grants and dispatch policy
+internal/httpapi/                compute and separate lab deployment HTTP handlers/contracts
+internal/local/                  explicit local/Entra configuration boundaries
+internal/orchestration/          Temporal workflow, dispatch, recovery and simulated provider
+internal/store/                  pgx repositories, audit, durable effects and integration tests
+internal/store/migrations/       numbered, checksum-verified forward SQL migrations
+internal/deployment/             bounded deployment/target/plan model; no Azure SDK
+internal/keyvaultrunner/          native certificate ARM/Terraform activities and recovery
+internal/telemetry/              local OTLP and sanitized correlation
+patterns/key-vault/              embedded digest-pinned AzAPI create-only pattern
+scripts/                        local setup/build/verification helpers
+config/                         checked-in collector config; ignored tenant/runtime config
+compose.yaml, compose.test.yaml  normal local stack and credentials-free test fixtures
+Dockerfile, .github/workflows/   pinned build/test environment and local-only CI definition
+docs/design/openapi*.yaml        portable compute and lab deployment contracts
+docs/design/, docs/adr/          target design, implementation notes and decision records
+AGENTS.md, CONTRIBUTING.md       active machine/human working instructions
+Makefile                        actual local/CI commands
 ```
 
 Keep interfaces with their consuming packages around actual provider, storage, policy, identity/authorization data, artifact/secret and audit boundaries. A notification port is added when an optional integration or later milestone uses it. No generic bus/plugin/approval/pricing/Terraform executor framework in M1. Avoid dependency direction from domain/workflows into Azure packages. Activity implementations load internal target bindings and invoke adapters.
 
-Use Go/chi, `pgx`-style PostgreSQL driver access, Temporal Go SDK and OpenTelemetry; exact library pins require compatibility/license/security checks at M1 start. Candidate versions and unknowns are in [references](references.md). Prefer a Makefile for familiar small-team tasks; Dev Container pins tool versions and offers fake-only/local DB mode. A developer can run API/worker on a laptop against the enterprise development Temporal namespace with approved certificate/network access; local integration Temporal is a test fixture, not a replacement service decision.
+Current Go/chi, pgx, Temporal and OpenTelemetry versions are pinned in `go.mod`; Dockerfile/Compose pin build and dependency images. [Version register](references.md) separates these from future choices. Tests live beside packages, including tagged process/DB integration tests. No Dev Container, Batch adapter, hosted runtime-transfer role, foundation Terraform or general stack executor is present. Enterprise Temporal connectivity still requires implementation/configuration and verified access; local Temporal does not replace the enterprise service decision.
 
 ## Two-engineer split and M1 stop condition
 
@@ -78,15 +76,15 @@ Critical path: M0 contract/recovery choices → M1.1 → durable acceptance → 
 
 ## CI, development, and release
 
-Use the concrete framework and gate matrix in the [working agreement](working-agreement.md): native Go testing/httptest, Temporal testsuite/replayer, Testcontainers PostgreSQL and a pinned real Temporal fixture, shared provider conformance, and version-verified OpenAPI lint/schema tools. Required checks cover format/vet/golangci-lint, affected behavior, real dispatch/concurrency/restart boundaries, build and dependency vulnerabilities. Replay selected histories on workflow changes. Do not require an Azure subscription for routine fake CI. Document-only changes receive proportional link/schema checks; unused application suites are not invented for M0.
+Use the actual commands in the [working agreement](working-agreement.md): native Go testing/httptest, Temporal testsuite/replayer, Compose PostgreSQL/Temporal fixtures and JSON Schema checks of actual HTTP responses. `make check` covers format/vet/unit/race/build; `make test-core` adds DB/process/replay and `make vuln-docker` scans dependencies. No golangci-lint or Testcontainers integration is installed. Keep Python/Redocly documentation checks separate. Do not require an Azure subscription for routine CI; document-only changes receive proportional checks, with HTTP contract tests when schemas change.
 
-GitHub Actions uses minimal job permissions and actions pinned to full commits. Untrusted PR jobs build/test without publishing identities or secret access. M1 builds/tests local API/worker images and records scans/SBOM; Azure publishing/deployment is not a required M1 action. M2.0 adds reviewed main/release federation to publish immutable digests/provenance and deploy through the Terraform-owned revision path. VM image and runtime OCI approvals are separate. No PAT/client secret is introduced for private module access; use the approved packaging path. Dev Container fixes tool versions and explicit development identity/namespace configuration. `.env.example` contains names/placeholders only.
+The checked-in GitHub Actions definition uses minimal permissions and commit-pinned actions for local tests, build and Go vulnerability checks; it neither publishes nor deploys. Remote CI execution, image scanning/SBOM/provenance and Dev Container setup are not claimed. Future M2.0 release federation and Terraform-owned revisions require separate approval. VM-image/runtime-OCI approval and private-module packaging remain separate work; no PAT/client secret is implied. Dockerfile pins current developer tooling; `.env.example` contains local setup fields, not tenant credentials.
 
-Conventional Commits and CODEOWNERS are proposed. Actual GitHub team handles are unknown: identify both engineering owners and required security/platform reviewers before creating CODEOWNERS, rather than putting invented accounts into policy. Restore usable repository Git metadata, then use ordinary reviewed branches/PRs; this M0 work has not been committed.
+Conventional Commits and CODEOWNERS remain proposed; no team handles are invented. Git is usable, and existing/uncommitted changes must be preserved. Do not commit or push without an explicit request. Human review and remote CI evidence remain distinct from local assistant-run checks.
 
 ## Failure acceptance catalog
 
-Every row is **planned / not run**. The tier matrix above is authoritative: M1 exercises the listed fake cases; M3 exercises all F01–F18, including every one of the twelve source cases. M2 probes the provider before integration. Evidence includes fault-injection command/fixture/version, execution IDs, actual state/events/attempt counts, result/cleanup proof and sanitized failure logs. Use synthetic inputs and an approved target-specific injection method; unavailable evidence is pending, not an omitted pass.
+Rows below are **acceptance requirements, not blanket pass/fail results**. Selected local cases have evidence in [progress](../progress.md) and the [verification overlay](12-verification.md#current-evidence-overlay); the complete F01–F16/F18 local matrix remains open. The tier matrix above is authoritative; live compute cases are unrun. Evidence must identify the fault window, fixture/version, execution IDs, state/events/attempt counts and result/cleanup proof. Keep partial coverage visible rather than marking an entire gate passed from one test.
 
 | ID | Source §16 scenario | Expected convergence / proof |
 | --- | --- | --- |

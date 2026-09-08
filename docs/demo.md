@@ -13,7 +13,7 @@ Open [TLDR](TLDR.md). Say: “We are building the API first. Entra authenticates
 ## 2. Show the running system — three minutes
 
 ```sh
-docker compose up --build -d --wait
+make up
 docker compose ps
 sh scripts/demo.sh
 ```
@@ -41,14 +41,14 @@ docker compose -f compose.test.yaml run --rm --no-deps tests
 
 Open `internal/auth/entra_test.go`: forged, expired, wrong-tenant/audience/client and ID tokens are denied. Then `internal/httpapi/entra_test.go`: the actual verifier/router enforce ownership and current grants, including after revocation with an old cursor/ETag. Synthetic signing keys keep this deterministic; they are not accepted by the running API.
 
-Input tests exercise strict request validation. Temporal tests advance a virtual clock without a server or fixed sleeps. `make test-integration` exercises transactions and concurrency in a separate ephemeral PostgreSQL database.
+Input tests exercise strict validation; HTTP tests validate actual responses against OpenAPI. Temporal unit tests advance a virtual clock. `make test-integration` exercises real PostgreSQL transactions. `make test-core` additionally kills/restarts an actual worker and replays old/new Temporal histories. `docker compose logs --tail=100 collector` shows local sanitized traces.
 
 ## 4. Show the co-development loop — two minutes
 
-Open [handoff](handoff.md). Choose one behavior → add its failing test → implement → run checks → human review. Each session gets an exact code map and bounded task, not a mandate to reread the design folder. After connected identity evidence, a suitable next slice is bounded event long-polling.
+Open [handoff](handoff.md). Choose one behavior → add its failing test → implement → run checks → human review. Each session gets an exact code map and bounded task, not a mandate to reread the design folder. Long polling is implemented; the next acceptance work is listed there.
 
 ## 5. Close with the roadmap — one minute
 
-“Next we finish core semantics, authorization/recovery, telemetry and CI. Then we add reviewed shared Azure hosting and a real compute provider. Azure services should use managed identities; external workloads should use WIF. Infrastructure operations through the API come later.”
+“The local API has the core job lifecycle, recovery, telemetry and CI gates. One approved Key Vault was created through the API, Temporal and Terraform. The separate lab executor now uses a short-lived certificate; its real ARM/Terraform reads passed, but create/apply under that identity is not yet proven. Next we finish local failure/security acceptance and human review. General Terraform-repo execution and hosted managed identity are future, separately approved work. Hosted Azure services should use managed identities; trusted external workloads should use WIF.”
 
 If startup/sign-in fails, inspect sanitized API logs and the browser's Entra error. Do not turn off authentication or claim a successful unit suite proves connected sign-in. Keep the application's named volumes; see README for shutdown. The Temporal UI and local database remain development interfaces, not Entra-protected endpoints.
