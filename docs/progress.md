@@ -1,5 +1,15 @@
 # Current work — local core implementation and acceptance
 
+## Windows/WSL handover review — 2026-09-08
+
+Reviewed session transfer, handoff and work setup against the current checkout and retained local verification logs. Source was clean at `ddbc9c2` before this documentation update. Current environment: Ubuntu-24.04 WSL2, Linux `6.18.33.1-microsoft-standard-WSL2`, x86_64; working directory `/home/cam/code/forgeapi-homelab`.
+
+**Recorded setup evidence:** ignored `.local/wsl-migration-verification-retry.log` from `sh scripts/verify-local.sh -print-login-url` reports Docker Engine 29.7.2/Compose 5.5.1, passing containerized unit/race tests and real PostgreSQL/Temporal integration tests, including worker kill/restart and replay. Its real-Entra walkthrough ends with `PASS: local walkthrough complete`: `exec_a5ee662dd98e9ec51292c5d2f62727a5` succeeded with verified synthetic artifact, `exec_5b5a827220283967c5ae4412183f537a` cancelled and `exec_1d1bb327b3ea8357619d6d53c7dc6238` timed out. Replay/conflict and missing-token/former-fixture denial passed. The earlier `.local/wsl-migration-verification.log` ended with migration exit 1; it is not a passing run. Preserve both logs.
+
+**Current read-only check:** `docker compose ps --format json` shows API, PostgreSQL and Temporal healthy, synthetic worker and collector running; API/worker bind configuration from the WSL checkout. PostgreSQL/Temporal retain their older creation-path labels and named volumes; this is not evidence of a deployment-state migration. This review did not rerun tests/browser sign-in or inspect Azure, executor credentials or original deployment state. Updated transfer/handoff to record Windows completion and the committed handoff revision; runtime behavior is unchanged.
+
+**Remaining risks / next task:** Windows local-core setup evidence is complete; human acceptance remains separate. Mac execution, connected second-user isolation and the remaining M1 gates are still pending. Continue feature work on Windows: cancellation/retry/history-budget acceptance is the existing next coding task; PAT-01 remains planned until selected. Transfer the final reviewed source revision to Mac and run fresh core setup there. No commit, push or infrastructure operation performed.
+
 ## Pattern-registry handoff clarification — 2026-09-07
 
 Expanded the previously buried recommendation into [PAT-01: Add the Terraform pattern interface and registry](session-transfer.md#pat-01-add-the-terraform-pattern-interface-and-registry), with named extraction points, end-to-end binding/compatibility requirements, a test-only second pattern, checks and a dedicated implementation prompt. Linked it prominently from the main handoff. Status remains planned; selecting this task is separate from machine setup or authorization to add/provision a real resource. Documentation only; no code/runtime/Azure change. PASS: 37 local links/anchors across four handoff/status documents and `git diff --check`; previous runtime evidence was not rerun. Next action is destination setup, then the engineer's selection of core acceptance or PAT-01.

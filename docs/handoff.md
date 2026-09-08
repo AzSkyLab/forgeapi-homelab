@@ -8,6 +8,7 @@
 
 ## Five-minute orientation
 
+- **Windows setup complete:** Ubuntu-24.04/WSL2 local tests and real-Entra walkthrough passed; reviewed 2026-09-08 in [progress](progress.md). Work from `/home/cam/code/forgeapi-homelab`. Mac setup remains a future destination gate.
 - **New session on another machine?** Start with [session transfer](session-transfer.md): source/config/state boundaries, fresh-machine setup, pasteable prompt and Terraform extension assessment. A clone does not contain prior deployment records or credentials.
 - **Setting up at work tomorrow?** Follow [work-setup.md](work-setup.md): exact setup command, human sign-in and required live proof.
 - [TLDR](TLDR.md): what to explain and roadmap.
