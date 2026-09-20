@@ -97,3 +97,22 @@ def update(
     # Same as SQLite: updating a missing record changes nothing.
     with _table() as table, contextlib.suppress(ResourceNotFoundError):
         table.update_entity(changes, mode=UpdateMode.MERGE)
+
+
+def respec(
+    deployment_id: str,
+    inputs: dict[str, Any],
+    version: str | None,
+    commit: str | None,
+    now: datetime,
+) -> None:
+    changes = {
+        "PartitionKey": _PARTITION,
+        "RowKey": deployment_id,
+        "inputs": json.dumps(inputs),
+        "version": version or "",
+        "commit_sha": commit or "",
+        "updated_at": now.isoformat(),
+    }
+    with _table() as table, contextlib.suppress(ResourceNotFoundError):
+        table.update_entity(changes, mode=UpdateMode.MERGE)

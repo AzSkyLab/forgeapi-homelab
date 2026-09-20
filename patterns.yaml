@@ -17,3 +17,7 @@ patterns:
   # Unversioned local example: no cloud, no credentials.
   local-file:
     local: examples/local-file
+
+  # Diagnostic, creates nothing: can Terraform sign in as the worker's identity and write state?
+  azure-identity-check:
+    local: examples/azure-identity-check

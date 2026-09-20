@@ -146,3 +146,33 @@ def test_identity_handed_to_terraform(monkeypatch, tmp_path):
     args = terraform._backend_args("dep_x")
     assert "-backend-config=use_msi=true" in args
     assert "-backend-config=key=deployments/dep_x.tfstate" in args
+
+
+def test_update_reapplies_new_inputs_in_place():
+    deployment = _accept("local-file", {"filename": "same.txt", "content": "first"})
+    assert asyncio.run(_run_workflow(deployment.id)) == "succeeded"
+    written = Path(db.get(deployment.id).outputs["path"])
+
+    db.respec(deployment.id, {"filename": "same.txt", "content": "second"}, None, None)
+    assert asyncio.run(_run_workflow(deployment.id)) == "succeeded"
+
+    assert written.read_text() == "second"
+    log = terraform.log_path(deployment.id).read_text()
+    assert "1 to add, 0 to change, 1 to destroy" in log  # a change against existing state
+
+
+def test_version_change_is_refused_when_state_is_local():
+    deployment = _accept("demo", {"filename": "a.txt", "content": "x"}, "v1.0.0")
+    assert asyncio.run(_run_workflow(deployment.id)) == "succeeded"
+
+    newer = catalog.resolve("demo", "v1.1.0")
+    db.respec(deployment.id, deployment.inputs, newer.version, newer.commit)
+    assert asyncio.run(_run_workflow(deployment.id)) == "failed"
+    assert "keeps local state" in db.get(deployment.id).error
+
+
+def test_identity_check_example_is_valid_terraform():
+    terraform.deployment_dir("dep_check").joinpath("work").mkdir(parents=True)
+    example = Path(__file__).resolve().parent.parent / "examples" / "azure-identity-check"
+    terraform._run("dep_check", "init", "-no-color", "-backend=false", f"-from-module={example}")
+    terraform._run("dep_check", "validate", "-no-color")

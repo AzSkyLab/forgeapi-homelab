@@ -21,6 +21,11 @@ class DeploymentCreate(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
 
 
+class DeploymentUpdate(BaseModel):
+    version: str | None = None
+    inputs: dict[str, Any] | None = None
+
+
 class Deployment(BaseModel):
     id: str
     pattern: str

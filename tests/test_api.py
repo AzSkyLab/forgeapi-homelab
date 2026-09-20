@@ -151,3 +151,49 @@ def test_destroy_only_settled_deployments(client, dispatched):
     assert dispatched[-1] == f"destroy:{deployment_id}"
     assert client.delete(f"/deployments/{deployment_id}").status_code == 409  # already destroying
     assert client.delete("/deployments/dep_missing").status_code == 404
+
+
+def test_update_changes_inputs_and_version_then_reapplies(client, dispatched, pattern_repo):
+    deployment_id = _post(client, version="v1.0.0").json()["id"]
+    assert client.put(f"/deployments/{deployment_id}", json={}).status_code == 409  # not settled
+    db.update(deployment_id, State.succeeded, outputs={"path": "/x"})
+
+    # `suffix` only exists from v1.1.0: rejected on the current version, accepted with the bump.
+    new_inputs = {**INPUTS, "suffix": "!"}
+    assert (
+        client.put(f"/deployments/{deployment_id}", json={"inputs": new_inputs}).status_code == 422
+    )
+    updated = client.put(
+        f"/deployments/{deployment_id}", json={"version": "v1.1.0", "inputs": new_inputs}
+    )
+
+    assert updated.status_code == 202
+    body = updated.json()
+    assert body["state"] == "accepted" and body["version"] == "v1.1.0"
+    assert body["commit"] == git(pattern_repo, "rev-parse", "v1.1.0^{commit}")
+    assert body["inputs"] == new_inputs
+    assert body["outputs"] == {"path": "/x"}  # kept until the new run replaces them
+    assert dispatched == [deployment_id, deployment_id]
+
+
+def test_update_keeps_inputs_when_only_the_version_changes(client, dispatched):
+    deployment_id = _post(client, version="v1.0.0").json()["id"]
+    db.update(deployment_id, State.succeeded, outputs={})
+    body = client.put(f"/deployments/{deployment_id}", json={"version": "v1.1.0"}).json()
+    assert body["inputs"] == INPUTS and body["version"] == "v1.1.0"
+    assert client.put("/deployments/dep_missing", json={}).status_code == 404
+    assert (
+        client.put(f"/deployments/{deployment_id}", json={"version": "v9.9.9"}).status_code == 409
+    )
+
+
+def test_store_outage_is_a_clear_503(client, monkeypatch):
+    from azure.core.exceptions import HttpResponseError
+
+    def broken(_):
+        raise HttpResponseError("AuthorizationPermissionMismatch: secret-looking detail")
+
+    monkeypatch.setattr(db, "get", broken)
+    response = client.get("/deployments/dep_any")
+    assert response.status_code == 503
+    assert "secret-looking" not in response.text

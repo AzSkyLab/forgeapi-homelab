@@ -60,6 +60,7 @@ patterns:
 | `GET /patterns/{name}/schema` | JSON Schema for `inputs`, for portals, form builders and client-side validation |
 | `POST /deployments?dry_run=true` | checks a request and creates nothing |
 | `POST /deployments/{id}/retry` | re-runs a failed deployment against the same commit, inputs and state; Terraform finishes what is missing |
+| `PUT /deployments/{id}` | change inputs and/or pattern version and apply the difference against the existing state (`inputs` replaces the whole set; omit to keep) |
 | `DELETE /deployments/{id}` | `terraform destroy` from the deployment's state; the record is kept as `destroyed` |
 | `POST /deployments {"pattern","version","inputs"}` | `version` optional (latest tag). The tag is resolved to a commit at acceptance; that commit is what runs, even if the tag later moves |
 

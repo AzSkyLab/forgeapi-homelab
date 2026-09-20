@@ -91,3 +91,15 @@ def test_update_keeps_outputs_and_replaces_error(store):
     db.update(deployment_id, State.destroying)  # a later state change must not drop outputs
     assert db.get(deployment_id).outputs == {"uri": "https://x", "list": [1, 2]}
     assert db.get(deployment_id).updated_at > done.created_at
+
+
+def test_respec_changes_what_the_deployment_should_be(store):
+    deployment_id = db.create("demo", {"a": 1}, "v1.0.0", "aaa").id
+    db.update(deployment_id, State.succeeded, outputs={"kept": True})
+
+    db.respec(deployment_id, {"a": 2, "b": "new"}, "v1.1.0", "bbb")
+
+    changed = db.get(deployment_id)
+    assert changed.inputs == {"a": 2, "b": "new"}
+    assert (changed.version, changed.commit) == ("v1.1.0", "bbb")
+    assert changed.state == State.succeeded and changed.outputs == {"kept": True}

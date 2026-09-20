@@ -84,15 +84,19 @@ def _backend_args(deployment_id: str) -> list[str]:
 def prepare(deployment_id: str, source: str, variables: dict[str, Any]) -> None:
     """Workspace with the pattern at its pinned commit, initialised against its state.
 
-    A prepared workspace is reused (local-state patterns keep their state there). Otherwise it is
-    fetched again; remote state makes that safe on any worker, for retries and destroys alike."""
+    A workspace already holding this source is reused (local-state patterns keep their state
+    there). Otherwise the pattern is fetched again; remote state makes that safe on any worker,
+    for retries, updates to a new version, and destroys alike."""
     workdir = deployment_dir(deployment_id) / "work"
-    tfvars = workdir / "terraform.tfvars.json"
-    if not tfvars.exists():
+    marker = workdir / ".forgeapi-source"
+    if not marker.exists() or marker.read_text() != source:
+        if (workdir / "terraform.tfstate").exists():
+            raise TerraformError("cannot change the version of a deployment that keeps local state")
         shutil.rmtree(workdir, ignore_errors=True)
         workdir.mkdir(parents=True)
         _run(deployment_id, "init", "-no-color", "-backend=false", f"-from-module={source}")
-        tfvars.write_text(json.dumps(variables))
+        marker.write_text(source)
+    (workdir / "terraform.tfvars.json").write_text(json.dumps(variables))
     backend = _backend_args(deployment_id) if catalog.uses_azurerm_backend(workdir) else []
     _run(deployment_id, "init", "-no-color", *backend)
 

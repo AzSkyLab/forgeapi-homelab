@@ -52,6 +52,11 @@ def update(
     _store().update(deployment_id, state, outputs, error, datetime.now(UTC))
 
 
+def respec(deployment_id: str, inputs: dict[str, Any], version: str | None, commit: str | None):
+    """Change what the deployment should be; the next run applies it against the same state."""
+    _store().respec(deployment_id, inputs, version, commit, datetime.now(UTC))
+
+
 def _store():
     return db_table if settings.db_backend == "table" else _Sqlite
 
@@ -95,6 +100,15 @@ class _Sqlite:
         fields["inputs"] = json.loads(fields["inputs"])
         fields["outputs"] = json.loads(fields["outputs"]) if fields["outputs"] else None
         return Deployment(**fields)
+
+    @classmethod
+    def respec(cls, deployment_id, inputs, version, commit, now) -> None:
+        with cls._connect() as conn:
+            conn.execute(
+                "UPDATE deployments SET inputs = ?, version = ?, commit_sha = ?, updated_at = ? "
+                "WHERE id = ?",
+                (json.dumps(inputs), version, commit, now.isoformat(), deployment_id),
+            )
 
     @classmethod
     def update(cls, deployment_id, state, outputs, error, now) -> None:

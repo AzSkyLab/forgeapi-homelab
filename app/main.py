@@ -1,12 +1,13 @@
 import uuid
 
+from azure.core.exceptions import AzureError
 from fastapi import Depends, FastAPI, HTTPException, Response, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from temporalio.client import Client
 
 from app import catalog, db, schema, terraform
 from app.auth import require_caller
-from app.models import DeploymentCreate, DeploymentOut, State
+from app.models import DeploymentCreate, DeploymentOut, DeploymentUpdate, State
 from app.settings import settings
 from app.workflows import DeployWorkflow, DestroyWorkflow
 
@@ -37,6 +38,15 @@ _dispatcher = TemporalDispatcher()
 
 def get_dispatcher() -> TemporalDispatcher:
     return _dispatcher
+
+
+@app.exception_handler(AzureError)
+async def store_unavailable(_request, _exc):
+    # Hosted: e.g. a role assignment that has not propagated yet. Details stay in the server log.
+    return JSONResponse(
+        {"detail": "deployment records are temporarily unavailable; try again shortly"},
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
 
 
 @app.get("/healthz")
@@ -172,6 +182,34 @@ async def retry_deployment(
     if deployment.state != State.failed:
         detail = f"only a failed deployment can be retried; this one is {deployment.state}"
         raise HTTPException(409, detail)
+    db.update(deployment_id, State.accepted)
+    await _start(dispatch, deployment, "deploy")
+    return DeploymentOut.of(_load(deployment_id))
+
+
+@app.put(
+    "/deployments/{deployment_id}",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=DeploymentOut,
+)
+async def update_deployment(
+    deployment_id: str,
+    body: DeploymentUpdate,
+    dispatch=Depends(get_dispatcher),
+    _caller: str = Depends(require_caller),
+):
+    """Change a deployment's inputs and/or pattern version and apply the difference against its
+    existing state. `inputs` replaces the whole set; omit it to keep the current inputs. Omit
+    `version` to stay on the current one."""
+    deployment = _load(deployment_id)
+    if deployment.state not in (State.succeeded, State.failed):
+        raise HTTPException(409, f"cannot update a deployment that is {deployment.state}")
+    resolved = _resolve(deployment.pattern, body.version or deployment.version)
+    inputs = deployment.inputs if body.inputs is None else body.inputs
+    problems = schema.errors(deployment.pattern, _variables(resolved), inputs)
+    if problems:
+        raise HTTPException(422, problems)
+    db.respec(deployment_id, inputs, resolved.version, resolved.commit)
     db.update(deployment_id, State.accepted)
     await _start(dispatch, deployment, "deploy")
     return DeploymentOut.of(_load(deployment_id))
