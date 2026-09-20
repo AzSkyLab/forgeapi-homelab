@@ -13,8 +13,8 @@ The same layout is a candidate for work, where workers may run on ACA against th
 | `temporal` | Container App running the dev server, internal ingress :7233, min replicas 0 **(lab)**. At work: the existing Temporal service; this app does not exist. | none |
 | Deployment records | Azure Table Storage in the existing state storage account | Entra auth, no keys |
 | Terraform state | existing `tfstate` container, one blob per deployment | Entra auth, no keys |
-| Image | GitHub Container Registry (free). ACR Basic is ~$5/month. | pull with a registry credential stored as an ACA secret **(lab)**; at work, the approved registry with MI pull |
-| Pattern repos | GitHub App installation token. **(lab)** interim: short-lived token as an ACA secret. | read-only on pattern repos |
+| Image | GitHub Container Registry (free). ACR Basic is ~$5/month. | **(lab)** public GHCR package, so no pull credential exists at all (this repo is already public and the image holds no secrets); at work, the approved registry with MI pull |
+| Pattern repos | GitHub App installation token. **(lab)** interim: a read-only token in a Key Vault secret, referenced by the apps through their managed identities; the value never enters Terraform state or the API. | read-only on pattern repos |
 
 `up`/`down` scripts set worker and Temporal replicas to 1 or 0. A few hours a week stays inside the free grant (~180k vCPU-s, ~360k GiB-s per month). Always-on worker + Temporal would cost a few dollars a month.
 
