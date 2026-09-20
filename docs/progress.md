@@ -204,3 +204,25 @@ First real-token test of `FORGEAPI_AUTH_MODE=entra` (throwaway local API, no wor
 Closes the long-standing "M5 tested with a local key only" gap. Any signed-in user in the tenant can obtain this token; per-user authorization is still parked.
 
 Dry run of the final `forgeapi-host` request (with `entra_audience`) is valid. **Pending, engineer to send:** the real POST.
+
+## 2026-09-20 — forgeapi hosted on Container Apps (deployed through its own API)
+
+`dep_a24111c44c6d49b39447762e7be82e73`, pattern `forgeapi-host` v0.1.0 (`3d1abc12`), engineer-approved.
+
+- **First attempt failed in 35 s:** `MissingSubscriptionRegistration` for `Microsoft.App` (subscription had never used Container Apps). Only the resource group was created. Registered the provider (one-time, free), then `POST …/retry` finished the same deployment: `succeeded`. A second retry sent while it was already applying was correctly refused with 409.
+- **Created:** `rg-forgeapi-forgeapi-host-dev`, environment `cae-forgeapi-host-dev` (Consumption, no Log Analytics), apps `ca-forgeapi-api-dev` (external), `ca-forgeapi-worker-dev` (no ingress), `ca-forgeapi-temporal-dev` (internal), all min 0 / max 1. Roles verified: API identity → Storage Table Data Contributor only; worker identity → table, `tfstate` blob container, Contributor + RBAC Administrator on the subscription.
+
+| Check against the hosted API | Result |
+| --- | --- |
+| Public image pull from GHCR without a credential | PASS (app started) |
+| `/healthz` from zero replicas | PASS: 200 in 0.29 s |
+| `/patterns` without a token / with a real Entra token | PASS: 401 / 200 |
+| Deployment lookup = Table Storage through the API's **managed identity** | PASS after propagation: first call 500 `AuthorizationPermissionMismatch` (role assignment seconds old), 404 on the next try ~1 min later; the identity created the `deployments` table itself |
+
+**Proved:** `ManagedIdentityCredential` works inside Container Apps for the Python SDK. **Still unproven:** Terraform (`ARM_USE_MSI`) with the worker's identity, internal TCP to Temporal, `scripts/aca.sh`. Worker and Temporal are still at zero replicas; nothing can deploy from the hosted copy yet.
+
+**Known gap:** the hosted API has no GitHub token, so `/patterns/{name}` for private repos will return 502 until the Key Vault token reference is set up.
+
+**Pattern follow-up:** `forgeapi-host` should tolerate the role-propagation delay better (the API returned a 500 rather than a clear 503), and its README should list `Microsoft.App` registration as a prerequisite.
+
+**Next:** Key Vault + read-only GitHub token reference; `scripts/aca.sh up`; deploy `resource-group` through the hosted API as the Terraform-managed-identity test; Graph permissions for the worker identity.
