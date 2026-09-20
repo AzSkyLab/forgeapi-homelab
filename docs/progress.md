@@ -184,3 +184,23 @@ Plan: [hosting-plan.md](hosting-plan.md) — Container Apps, scale-to-zero, mana
 `aca-hosting` pushed; tag **v0.1.0** triggered `.github/workflows/image.yml` (run 35542407062, success). Published `ghcr.io/azskylab/forgeapi` with tags `v0.1.0`, `latest`, `sha-5ab4ae7…`. Manual dispatch is not available until the workflow is on the default branch.
 
 **Open:** the package is **private** (org default); anonymous `docker manifest inspect` returns `unauthorized`. GitHub has no API for package visibility, so the engineer must set it to public once in the package settings before Container Apps can pull it without a credential.
+
+## 2026-09-20 — Entra auth set up and verified with a real token
+
+GHCR package made public by the engineer; anonymous `docker manifest inspect` of `ghcr.io/azskylab/forgeapi:v0.1.0` now succeeds.
+
+App registration **ForgeAPI Lab API** (single tenant, no secrets, no certificates): application ID URI `api://<client-id>`, access token version 2, one delegated scope `access_as_user`, Azure CLI pre-authorized so `az account get-access-token --scope api://<client-id>/access_as_user` works without a consent prompt. With v2 tokens `aud` is the client ID, so `FORGEAPI_ENTRA_AUDIENCE` / the pattern's `entra_audience` is the **client ID**, not the URI. IDs are in the engineer's tenant, not in this public repo.
+
+First real-token test of `FORGEAPI_AUTH_MODE=entra` (throwaway local API, no worker):
+
+| Request | Result |
+| --- | --- |
+| `/healthz`, no token | 200 (open by design) |
+| `/patterns`, no token / garbage token | 401 / 401 |
+| `/patterns`, valid Entra token for a **different** audience (ARM) | 401 |
+| `/patterns`, real token for this API (`ver 2.0`, correct `iss`, `scp access_as_user`) | 200 |
+| API log scanned for token or validation detail | none |
+
+Closes the long-standing "M5 tested with a local key only" gap. Any signed-in user in the tenant can obtain this token; per-user authorization is still parked.
+
+Dry run of the final `forgeapi-host` request (with `entra_audience`) is valid. **Pending, engineer to send:** the real POST.
