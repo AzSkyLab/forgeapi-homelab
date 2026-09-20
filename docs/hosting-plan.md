@@ -9,7 +9,7 @@ The same layout is a candidate for work, where workers may run on ACA against th
 | Piece | Hosting | Identity and rights |
 | --- | --- | --- |
 | `api` | Container App, external ingress, min replicas 0 (wakes on HTTP), `FORGEAPI_AUTH_MODE=entra` | system-assigned MI: **Storage Table Data Contributor on the deployments table only**. No ARM rights. |
-| `worker` | Container App, no ingress, min replicas 0 **(lab)** / ≥1 (work) | system-assigned MI: Contributor + RBAC Administrator on the target scope, Storage Blob Data Contributor on `tfstate`, Table Data Contributor on the deployments table, Graph `Group.ReadWrite.All` + `User.Read.All` |
+| `worker` | Container App, no ingress, min replicas 0 **(lab)** / ≥1 (work) | **user-assigned** MI with Table Data Contributor only. Terraform signs in as the Terraform app registration by presenting the MI's token as a federated credential (`ARM_USE_OIDC`); that app holds the deploy rights, state access and Graph permissions. |
 | `temporal` | Container App running the dev server, internal ingress :7233, min replicas 0 **(lab)**. At work: the existing Temporal service; this app does not exist. | none |
 | Deployment records | Azure Table Storage in the existing state storage account | Entra auth, no keys |
 | Terraform state | existing `tfstate` container, one blob per deployment | Entra auth, no keys |
@@ -32,7 +32,7 @@ One small key-value table, read by ID. The cheapest Postgres Flexible Server is 
 
 ## Risks to prove first once hosted
 
-- **Terraform + ACA managed identity.** Container Apps exposes identity through `IDENTITY_ENDPOINT`/`IDENTITY_HEADER`, not the VM metadata address. The azurerm/azuread providers and the azurerm backend must all obtain tokens that way. If any cannot, fallback is a federated credential on the app registration that trusts the worker's managed identity (still no secret). This is the first thing to test, with the `resource-group` pattern.
+- ✅ **Resolved — Terraform + ACA managed identity.** `ARM_USE_MSI` fails in Container Apps (`169.254.169.254: connection refused`); Terraform only knows the VM metadata address. Fix in use: the worker gets a managed-identity token with the Azure SDK (works) and Terraform uses it as a federated credential for the Terraform app registration. Requires a user-assigned identity and a one-time `az ad app federated-credential create`. Verified end to end.
 - **Cold start vs. Temporal connect.** The API connects lazily, so a sleeping Temporal gives a clean 503 and a failed record, not a hang. `up` must run before demos.
 - **In-memory Temporal history (lab).** Stopping Temporal mid-deployment strands that workflow; the deployment stays in its last state and `retry` recovers it because state is remote.
 - **Azure Files is not used.** SQLite on SMB has locking problems; that is the reason for Table Storage.

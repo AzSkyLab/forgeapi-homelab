@@ -226,3 +226,24 @@ Dry run of the final `forgeapi-host` request (with `entra_audience`) is valid. *
 **Pattern follow-up:** `forgeapi-host` should tolerate the role-propagation delay better (the API returned a 500 rather than a clear 503), and its README should list `Microsoft.App` registration as a prerequisite.
 
 **Next:** Key Vault + read-only GitHub token reference; `scripts/aca.sh up`; deploy `resource-group` through the hosted API as the Terraform-managed-identity test; Graph permissions for the worker identity.
+
+## 2026-09-20 — Hosted worker proven: update endpoint, federation, full hosted run
+
+**Built:** `PUT /deployments/{id}` (new inputs and/or pattern version, applied against existing state; refused for local-state patterns on a version change); `examples/azure-identity-check` (creates nothing; proves Terraform sign-in + remote state without any repo access); Azure store errors → 503; Terraform sign-in through **workload identity federation** (`FORGEAPI_AZURE_FEDERATED_CLIENT_ID`); `scripts/aca.sh` starts Temporal before the worker. Images `v0.1.1`, `v0.1.2`. Pattern `forgeapi-host` **v0.2.0** (user-assigned worker identity, no deploy rights on it). Tests: 66 passing.
+
+| Check (hosted unless noted) | Result |
+| --- | --- |
+| `PUT` image bump on the live host deployment (local API → Azure) | PASS: `0 to add, 4 to change, 0 to destroy` |
+| `scripts/aca.sh up/status/down` against real apps | PASS |
+| `local-file` through the hosted API | PASS: API → Table Storage → Temporal over internal TCP → worker → Terraform, `succeeded` in ~15 s |
+| `azure-identity-check` with `ARM_USE_MSI` | **FAIL as feared:** `ManagedIdentityAuthorizer … 169.254.169.254:80: connection refused`. Terraform cannot read a Container Apps managed identity |
+| `PUT` to pattern v0.2.0 + image v0.1.2 (version change in place) | PASS: `2 to add, 4 to change, 4 to destroy`; the 4 destroyed are the old worker identity's role assignments, including subscription Contributor and RBAC Administrator |
+| Federated credential `forgeapi-worker-lab` on the Terraform app (subject = worker identity) | created (engineer asked for all steps) |
+| `azure-identity-check` with federation | **PASS:** `signed_in_object_id` = the Terraform app's service principal, remote state written, no secret anywhere |
+| `DELETE` of both hosted test deployments through the hosted API | PASS: `destroyed` |
+
+**Security posture now:** API identity and worker identity can each touch only the deployments table. Deploy rights, state access and Graph permissions exist on exactly one principal (the Terraform app), reachable locally by the short-lived certificate and hosted by federation from one named identity.
+
+**Created outside Terraform:** `Microsoft.App` provider registration; Key Vault `kv-forgeapi-host-38b9` in `forgeapitestRG01` (RBAC, empty) with Secrets Officer for the engineer, to hold a read-only pattern-repo token. Kept out of the host resource group on purpose so destroying the host does not trip over an unmanaged resource.
+
+**Pending, engineer:** create a fine-grained read-only GitHub token and store it in the vault; then `PUT` the host deployment with `github_token_secret_id` + `github_token_key_vault_id`, `aca.sh up`, and deploy `resource-group` through the hosted API (first real pattern from a private repo, hosted). Worker and Temporal are currently **down** (free).
