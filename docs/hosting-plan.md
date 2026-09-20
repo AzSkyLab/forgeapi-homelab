@@ -40,3 +40,31 @@ One small key-value table, read by ID. The cheapest Postgres Flexible Server is 
 ## Not simulated
 
 Work's Temporal on AKS (persistence, auth, namespaces), private networking/VNet-integrated environment, multi-replica workers, the approved registry and gateway.
+
+## Future option: pattern artifacts instead of GitHub access (not built)
+
+**Problem it solves:** at work nobody on the team may be allowed to create or hold a GitHub credential. Today the worker and API fetch patterns from GitHub at run time, which needs a token (lab: a fine-grained read-only token in Key Vault; usual enterprise answer: a GitHub App owned by the platform team). This option removes GitHub from the runtime entirely, so **no key exists anywhere**.
+
+**Idea:** publish each pattern release to Azure storage; forgeapi reads patterns from there with its managed identity.
+
+1. **In each pattern repo**, a GitHub Actions workflow on `v*` tags:
+   - `terraform init -backend=false` so every nested module is downloaded into `.terraform/modules` (the package is then self-contained; the worker never needs GitHub, not even for modules);
+   - optionally scan/validate here, before anything is published;
+   - tar the root module (plus `config.yaml`) and upload it as `<pattern>/<tag>.tar.gz` to a storage container;
+   - sign in to Azure with **GitHub OIDC federation** (`azure/login` with a federated credential on an app registration or user-assigned identity that has Storage Blob Data Contributor on that container). Same kind of trust as the hosted worker uses, in the other direction. No secret in GitHub either.
+2. **In forgeapi**, a second catalog source type next to `repo:` and `local:`, e.g.
+   ```yaml
+   key-vault:
+     artifacts: https://<account>.blob.core.windows.net/patterns/key-vault
+   ```
+   - versions = blob names (semver sorted), replacing `git ls-remote --tags`;
+   - pin by blob **content hash/ETag** instead of commit SHA, so a re-uploaded tag cannot change what an accepted deployment runs; make the container immutable (version-level WORM) if available;
+   - fetch = download + extract into the workspace (Python, `app/azure_identity.credential()`), then the existing `terraform init` / plan / apply. `-from-module` is not needed for this source type;
+   - `variables()` and `config()` read from the extracted package exactly as they do from a git checkout, so discovery, JSON Schema, dry run, PUT, retry and DELETE are unchanged.
+3. **Rights:** API and worker identities get Storage Blob Data **Reader** on the patterns container. Nothing else changes.
+
+**Why it is attractive beyond "no key":** releases are immutable and can be gated before publication; deployments do not depend on GitHub being reachable; provider/module supply chain is fixed at release time rather than resolved at deploy time.
+
+**Costs / things to decide:** one workflow file per pattern repo (~25 at work; a reusable workflow keeps it to a few lines each); who owns the publishing identity; whether the package should also vendor providers (bigger, fully offline) or keep using the registry; retention of old versions. Estimated forgeapi work: about a day including tests against Azurite.
+
+**Alternatives considered:** GitHub App installation token (needs org admins once; a private key exists but lives in their vault); mirroring pattern repos to Azure DevOps Repos, which accepts Entra tokens from managed identities (only if work uses Azure DevOps). "Internal" repo visibility does not help: it still requires authentication.
