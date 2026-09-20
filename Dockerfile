@@ -1,24 +1,19 @@
-FROM golang:1.27.1-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c0627f666428e40310f6b AS dev
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-ENV GOTOOLCHAIN=local
+FROM hashicorp/terraform:1.15.9 AS terraform
 
-# The browser's callback runs on the laptop, not Docker's private loopback.
-# The helper is not copied into the API runtime image.
-FROM dev AS demo-build
-ARG CLIENT_OS
-ARG CLIENT_ARCH
-RUN CGO_ENABLED=0 GOOS=${CLIENT_OS} GOARCH=${CLIENT_ARCH} go build -trimpath -o /out/forgeapi-demo ./cmd/demo
-RUN CGO_ENABLED=0 GOOS=${CLIENT_OS} GOARCH=${CLIENT_ARCH} go build -trimpath -o /out/forgeapi-keyvault-worker ./cmd/keyvault-worker
-
-FROM dev AS build
-RUN CGO_ENABLED=0 go build -trimpath -o /out/forgeapi ./cmd/forgeapi
-
-FROM scratch AS runtime
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build /out/forgeapi /forgeapi
-USER 65532:65532
-ENTRYPOINT ["/forgeapi"]
-CMD ["api"]
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+COPY --from=terraform /bin/terraform /usr/local/bin/terraform
+# git: Terraform fetches each pattern from its own repo at the pinned commit.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+COPY app app
+COPY patterns.yaml ./
+COPY examples examples
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    HOME=/tmp \
+    FORGEAPI_DATA_DIR=/data \
+    FORGEAPI_TEMPORAL_ADDRESS=temporal:7233
+USER 1000:1000

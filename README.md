@@ -1,79 +1,88 @@
-# ForgeAPI — local-first execution API
+# forgeapi
 
-A Go API for requesting and tracking asynchronous jobs. **Entra sign-in is required.** The API, PostgreSQL, Temporal and worker run locally in Docker; compute is simulated. No Azure hosting or paid resources are needed for this local slice.
+Minimal API that runs Terraform patterns as Temporal jobs. Python/FastAPI rewrite; the earlier Go implementation lives on `main` and its docs are in `docs/archive-go/`.
 
-**Separately authorized live spike:** [one empty Standard Key Vault through the API and Terraform](docs/key-vault-demo.md). The trusted native worker now uses a [dedicated lab service principal and seven-day certificate](docs/terraform-identity.md), with no human CLI fallback or credentials in Docker. Exact saved-plan approval is required. `make keyvault-identity-check` safely verifies actual executor access against the existing vault without applying anything. This is not general repository execution or shared deployment.
+Plan, rules and milestones: [docs/rewrite-plan.md](docs/rewrite-plan.md). Current state and evidence: [docs/progress.md](docs/progress.md).
 
-Read the [TLDR and roadmap](docs/TLDR.md). For tomorrow's machine/tenant setup, give the assistant [these exact instructions](docs/work-setup.md). For co-development, start with the short [handoff](docs/handoff.md); the larger design package is reference material, not required onboarding.
-
-## Set up and run
-
-1. Complete the one-time [Entra configuration](docs/entra-local.md): two app registrations, three IDs and a local grant. **No client secret.**
-2. Start Docker, then run:
+## Run with Docker (easiest)
 
 ```sh
-make up
-sh scripts/demo.sh
+docker compose up --build -d      # Temporal + worker + API; UI http://localhost:8233
+curl localhost:8000/healthz
+docker compose logs -f worker     # watch jobs
+docker compose down               # stop; data in .local/data is kept
 ```
 
-The helper opens browser sign-in using Microsoft's library and PKCE. It runs the authenticated submission/replay/status/results/cancellation/timeout walkthrough without printing or saving tokens. It exits nonzero on failure. On a headless terminal use `sh scripts/demo.sh -print-login-url` and open the URL in a browser on the **same machine**.
+Then use the curl commands below. Run either this Docker stack or the native one, never both at once: two workers on one queue with different filesystem views break Terraform's provider cache. Only the worker container gets the Terraform certificate (`.local/executor`, read-only); the API container does not. Temporal history is in-memory and resets on `down`; deployments and Terraform state do not.
 
-API liveness: <http://localhost:8080/healthz> · Temporal UI: <http://localhost:8233>
+## Run natively
 
-After configuration, rehearse with **`sh scripts/verify-local.sh`**: Docker checks → unit/race/contract tests → real PostgreSQL/Temporal recovery tests → startup → browser sign-in and demo. No cloud objects are created by these commands. `make up` stops API/worker for versioned migrations; it preserves both data volumes. Without Make, run `docker compose stop api worker` before `docker compose up --build -d --wait`.
-
-### On your Mac
-
-Use your organization's approved [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/), with Linux containers and Compose. No host Go installation is needed. Docker builds a native Mac sign-in helper into the ignored `.local/bin` directory; it runs on the host so the browser callback reaches the right localhost.
-
-The pinned Go, PostgreSQL and Temporal image indexes include both `linux/arm64` and `linux/amd64`. Do not force amd64 on Apple silicon. [Docker architecture selection](https://docs.docker.com/build/building/multi-platform/). Image/build availability is not proof of execution on an actual Mac; rehearse on that machine.
-
-Prerequisites: Docker Engine 28+, Compose v2.20+ or later, ports 8080/54329/7233/8233 and the temporary sign-in callback port 8400 available. The helper build supports both classic Docker and BuildKit; no separate Buildx installation is required. First builds need Docker Hub/Go module access; sign-in and API signing-key refresh need outbound HTTPS to Entra. Prebuild before the meeting.
-
-## Tests need no tenant or credentials
+Needs [uv](https://docs.astral.sh/uv/) and the `terraform` binary. No Docker, Azure or Entra.
 
 ```sh
-docker compose -f compose.test.yaml run --build --rm --no-deps tests
-make test-integration
-make test-core
-make vuln-docker
+uv sync
+uv run pytest                          # includes real Temporal + Terraform runs
 ```
 
-The separate test project contains ephemeral PostgreSQL/Temporal and test processes, with no host ports or tenant configuration. `test-core` kills/restarts a real worker, verifies independent cleanup/delivery recovery and replays old/new Temporal histories. `vuln-docker` scans reachable Go vulnerabilities. It does not start an API with selectable identities. Without Make, the PostgreSQL-only check is:
+Three terminals:
 
 ```sh
-docker compose -f compose.test.yaml up -d --wait postgres
-docker compose -f compose.test.yaml run --build --rm --no-deps -e 'FORGE_TEST_DATABASE_URL=postgres://forge:test-fixture-only@postgres:5432/forge?sslmode=disable' tests go test -race -count=1 -v -tags=integration ./internal/store
+uv run python -m app.devserver         # Temporal dev server :7233, UI http://localhost:8233
+uv run python -m app.worker
+uv run uvicorn app.main:app --reload   # API :8000, docs http://localhost:8000/docs
 ```
 
-With Go 1.27.1 installed, `make check` runs formatting, vet, race tests and build. Native race detection needs a C compiler; the Docker dev image includes one. Targeted examples:
+`app.devserver` downloads the official Temporal dev-server binary on first use; `temporal server start-dev` works the same if you have the CLI.
 
 ```sh
-go test -v ./internal/auth -run TestEntraTokenValidation
-go test -v ./internal/httpapi -run TestEntraHTTPAuthorization
-go test -v ./internal/execution -run TestResolveTemplate
-go test -v ./internal/orchestration -run TestWorkflow
+curl -s -XPOST localhost:8000/deployments -H 'content-type: application/json' \
+  -d '{"pattern":"local-file","inputs":{"filename":"hello.txt","content":"hi"}}'
+curl -s localhost:8000/deployments/<id>          # accepted -> planning -> applying -> succeeded
+curl -s localhost:8000/deployments/<id>/logs     # terraform output
 ```
 
-Auth tests generate synthetic signing keys and replace only the external JWKS response; they do not prove real tenant configuration. Unit/HTTP/workflow tests need neither Docker nor Azure. Tagged database tests fail, rather than skip, if PostgreSQL is unavailable.
+## Patterns
 
-## Stop and inspect
+No Terraform lives in this repo. Each pattern is a runnable root module (its own `provider` and `backend "azurerm" {}` blocks) in its own git repo, versioned by semver tags. `patterns.yaml` is the whole registration:
 
-```sh
-docker compose logs --tail=100 api worker
-docker compose logs --tail=100 collector
-docker compose down
-docker compose -f compose.test.yaml down
+```yaml
+patterns:
+  key-vault:
+    repo: github.com/AzSkyLab/terraform-azurerm-key-vault
+    path: pattern            # omit when the root module is the repo root
+    default_version: v1.1.3  # optional pin; omit to follow the newest tag
 ```
 
-Normal `down` preserves the application's named PostgreSQL and Temporal volumes. Do not use `down -v` unless you intend to erase execution/workflow history. The separate **test** database uses tmpfs and is discarded when stopped. Configuration is needed for Compose to resolve the normal stack even when stopping it; retain `.env` until shutdown.
+| Call | What it does |
+| --- | --- |
+| `GET /patterns` | catalog |
+| `GET /patterns/{name}?version=v1.0.0` | everything needed to use it, read from the pattern repo at that tag: `about` (the repo's `config.yaml`: description, use cases, sizing, costs), `versions`, `inputs` (type, default, description, allowed values/ranges and the author's rule messages) and a ready-to-edit `example` request |
+| `GET /patterns/{name}/schema` | JSON Schema for `inputs`, for portals, form builders and client-side validation |
+| `POST /deployments?dry_run=true` | checks a request and creates nothing |
+| `POST /deployments/{id}/retry` | re-runs a failed deployment against the same commit, inputs and state; Terraform finishes what is missing |
+| `DELETE /deployments/{id}` | `terraform destroy` from the deployment's state; the record is kept as `destroyed` |
+| `POST /deployments {"pattern","version","inputs"}` | `version` optional (latest tag). The tag is resolved to a commit at acceptance; that commit is what runs, even if the tag later moves |
 
-## Boundaries
+Inputs are checked at the API (422, all problems at once, never echoing the submitted value). `validation` blocks in the common shapes (`contains([...], var.x)`, `can(regex("...", var.x))`, numeric ranges, `length(var.x)` bounds, joined with `&&`) are lifted into the schema and answered with the author's own `error_message`. Any other rule is still enforced by Terraform at plan time and its message lands in the deployment's `error`.
 
-This is an **M1 local development increment**, not full M1 acceptance or a deployable service. Entra is the only runtime authenticator; `X-Demo-Principal` is rejected. Only synthetic workload data belongs here. All published ports bind to loopback; browser-origin API calls are rejected. Do not expose the stack through tunnels or deploy it to ACA.
+**Pattern authoring convention:** `variable` descriptions, `validation` error messages and `config.yaml` are the user documentation. Write them for the person calling the API.
 
-PostgreSQL stores API records/outbox/results. Temporal's development server stores its own history in a SQLite-backed named volume, not the application's PostgreSQL. Keep both volumes. The project bridge permits outbound networking; it is not a workload sandbox. PostgreSQL and Temporal's local development interfaces do **not** gain Entra protection from the HTTP API's auth layer.
+**Releasing a pattern change:** push a tag in the pattern repo. New deployments can use it immediately; nothing in this API is rebuilt or redeployed. Existing deployments stay on the commit they were created with.
 
-No production HA, cross-store restore guarantee, live compute provider or general-purpose Terraform execution is implemented. The separate one-vault Terraform spike has passed live API-to-Azure verification. No static Azure API key/client secret is used. Managed identities/WIF are the direction for future workloads, not credentials already available in plain local Docker. See [implementation evidence and remaining work](docs/progress.md) and [the meeting walkthrough](docs/demo.md).
+**State:** patterns with `backend "azurerm" {}` store state as `deployments/<id>.tfstate` in the configured storage container (Entra auth, blob-lease locking, no keys). Workspaces under `.local/data/deployments/` are throwaway. `local-file` (in `examples/`) is an unversioned, no-cloud example with local state.
 
-Local limits: 10 outstanding executions per caller, 100 total/backlogged intents; unknown/unfinished cleanup holds its slot. Replays consume no new slot. Event waits are 0–25 seconds with 64 concurrent waiters. Logs are bounded to 256 KiB/page. The private readiness/liveness listener is `127.0.0.1:8081` inside the API container, not published on the host. OTLP traces go only to the local collector, without bodies/tokens/baggage; database audit events survive process restarts. CI is defined in `.github/workflows/core.yml` but is not a remotely verified GitHub run until pushed by a human.
+**Private repos:** natively git uses your own credential helper. For Docker: `FORGEAPI_GITHUB_TOKEN=$(gh auth token) docker compose up --build -d`.
+
+## Auth
+
+Default `FORGEAPI_AUTH_MODE=none` is for loopback development. `entra` validates bearer tokens (signature via tenant JWKS, issuer, audience, expiry) on every `/deployments` route.
+
+## Layout
+
+```
+app/main.py        routes + Temporal dispatch      app/workflows.py   DeployWorkflow (no I/O)
+app/catalog.py     git-tag catalog, reads variables
+app/schema.py      rules -> JSON Schema, examples  app/activities.py  plan / apply / mark_failed
+app/db.py          SQLite deployments table        app/terraform.py   CLI subprocess wrapper
+app/auth.py        optional Entra validation       app/worker.py, app/devserver.py
+```
