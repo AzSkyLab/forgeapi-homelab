@@ -178,3 +178,9 @@ Plan: [hosting-plan.md](hosting-plan.md) — Container Apps, scale-to-zero, mana
 **Not done / not verified:** no `terraform plan` or apply of the host pattern; image never built or pushed (workflow not yet on the default branch or run); `scripts/aca.sh` only syntax-checked; ACA managed-identity token acquisition by Terraform and internal TCP ingress for Temporal remain the two hosting unknowns; Graph permissions for the worker identity are a manual directory-admin step after apply.
 
 **Next (engineer):** push `aca-hosting`, publish an image (tag or manual workflow run, then make the GHCR package public), then approve deploying `forgeapi-host`.
+
+## 2026-09-20 — Image published
+
+`aca-hosting` pushed; tag **v0.1.0** triggered `.github/workflows/image.yml` (run 35542407062, success). Published `ghcr.io/azskylab/forgeapi` with tags `v0.1.0`, `latest`, `sha-5ab4ae7…`. Manual dispatch is not available until the workflow is on the default branch.
+
+**Open:** the package is **private** (org default); anonymous `docker manifest inspect` returns `unauthorized`. GitHub has no API for package visibility, so the engineer must set it to public once in the package settings before Container Apps can pull it without a credential.
