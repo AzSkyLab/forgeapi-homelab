@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     entra_tenant_id: str | None = None
     entra_audience: str | None = None
 
+    # Where deployment records live. "table" is Azure Table Storage, for hosting.
+    db_backend: Literal["sqlite", "table"] = "sqlite"
+    table_storage_account: str | None = None
+    table_name: str = "deployments"
+    table_connection_string: str | None = None  # Azurite emulator only; real use is Entra auth
+
     # Read access to private pattern repos. Unset: git uses the host's own credential helper.
     # Local development only; a hosted deployment uses a GitHub App installation token.
     github_token: str | None = None
@@ -32,6 +38,9 @@ class Settings(BaseSettings):
     azure_subscription_id: str | None = None
     azure_client_id: str | None = None
     azure_client_certificate_path: Path | None = None
+    # Hosted on Azure: use the app's managed identity for Terraform (provider and state backend)
+    # and for Table Storage. Takes precedence over the certificate.
+    azure_use_managed_identity: bool = False
 
     # Remote state for patterns that declare `backend "azurerm" {}`: one blob per deployment,
     # Entra auth only (no storage keys).

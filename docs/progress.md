@@ -143,3 +143,22 @@ Pattern fix merged and tagged in the pattern repo (`AzSkyLab/terraform-azurerm-k
 **Not verified:** anything on the work Mac; M5 with a real Entra token; retry/destroy when the original workspace is gone (re-fetch path is covered only by the fresh-workspace deploy path).
 
 **Next:** run on the work Mac with the work pattern repos; GitHub App token and managed identity when hosted on Container Apps.
+
+## 2026-09-20 — Hosting groundwork (branch `aca-hosting`, nothing created in Azure)
+
+Plan: [hosting-plan.md](hosting-plan.md) — Container Apps, scale-to-zero, managed identity, Table Storage for records, GHCR for the image. Engineer note: work may host its Temporal workers on ACA too, so lab-only shortcuts are marked in the plan.
+
+**Built (steps 1–2 of the plan):**
+
+- `app/db.py` is now a three-function facade over a store; SQLite unchanged and default. `app/db_table.py` stores one entity per deployment in Azure Table Storage with Entra auth (`FORGEAPI_DB_BACKEND=table`).
+- `app/azure_identity.py`: managed identity when `FORGEAPI_AZURE_USE_MANAGED_IDENTITY=true`, else the approved certificate, else the default chain. With it set, Terraform gets `ARM_USE_MSI=true` and the backend `use_msi=true`, and the certificate is not handed over.
+
+| Check | Result |
+| --- | --- |
+| `uv run pytest` / `ruff` | PASS: 57 / clean |
+| Store contract (round trip, missing record, outputs kept across later updates, error replaced) against SQLite **and** Table Storage | PASS. Table Storage = Azurite emulator in Docker, started per test session and removed after; visibly skipped if Docker is absent |
+| Identity → Terraform env/backend mapping | PASS (unit level) |
+
+**Not verified, cannot be off-Azure:** Table Storage against the real account with Entra auth; Terraform obtaining tokens from a Container Apps managed identity (`IDENTITY_ENDPOINT`, not the VM metadata address). That is the first thing to prove once hosted; fallback is a federated credential trusting the worker's identity.
+
+**Next (needs the engineer):** create the GitHub App for pattern-repo reads (step 3); approve writing and applying the `terraform-pattern-forgeapi-host` pattern (step 4), the first step that creates hosted resources.

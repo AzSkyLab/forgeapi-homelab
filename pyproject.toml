@@ -12,6 +12,8 @@ dependencies = [
     "python-hcl2>=8.1.4",
     "pyyaml>=6.0.3",
     "jsonschema>=4.26.0",
+    "azure-data-tables>=12.7.0",
+    "azure-identity>=1.25.3",
 ]
 
 [dependency-groups]

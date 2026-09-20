@@ -124,3 +124,25 @@ def test_retry_after_failure_finishes_with_the_same_workspace_and_state(monkeypa
     result = db.get(deployment.id)
     assert result.state == State.succeeded and result.error is None
     assert Path(result.outputs["path"]).read_text() == "second time"
+
+
+def test_identity_handed_to_terraform(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "azure_tenant_id", "tenant")
+    monkeypatch.setattr(settings, "azure_subscription_id", "sub")
+    monkeypatch.setattr(settings, "azure_client_id", "client")
+    monkeypatch.setattr(settings, "azure_client_certificate_path", tmp_path / "client.pfx")
+    monkeypatch.setattr(settings, "state_resource_group", "rg")
+    monkeypatch.setattr(settings, "state_storage_account", "acct")
+
+    local = terraform._env()
+    assert local["ARM_CLIENT_CERTIFICATE_PATH"].endswith("client.pfx")
+    assert "ARM_USE_MSI" not in local
+    assert "-backend-config=use_msi=true" not in terraform._backend_args("dep_x")
+
+    monkeypatch.setattr(settings, "azure_use_managed_identity", True)
+    hosted = terraform._env()
+    assert hosted["ARM_USE_MSI"] == "true"
+    assert "ARM_CLIENT_CERTIFICATE_PATH" not in hosted  # managed identity wins; no cert handed over
+    args = terraform._backend_args("dep_x")
+    assert "-backend-config=use_msi=true" in args
+    assert "-backend-config=key=deployments/dep_x.tfstate" in args

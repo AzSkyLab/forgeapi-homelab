@@ -73,6 +73,10 @@ Inputs are checked at the API (422, all problems at once, never echoing the subm
 
 **Private repos:** natively git uses your own credential helper. For Docker: `FORGEAPI_GITHUB_TOKEN=$(gh auth token) docker compose up --build -d`.
 
+## Hosting
+
+Plan for Azure Container Apps, free when idle: [docs/hosting-plan.md](docs/hosting-plan.md). Built so far: `FORGEAPI_DB_BACKEND=table` (Azure Table Storage, Entra auth) and `FORGEAPI_AZURE_USE_MANAGED_IDENTITY=true` (Terraform provider, state backend and Table Storage use the app's managed identity; no certificate).
+
 ## Auth
 
 Default `FORGEAPI_AUTH_MODE=none` is for loopback development. `entra` validates bearer tokens (signature via tenant JWKS, issuer, audience, expiry) on every `/deployments` route.
@@ -83,6 +87,6 @@ Default `FORGEAPI_AUTH_MODE=none` is for loopback development. `entra` validates
 app/main.py        routes + Temporal dispatch      app/workflows.py   DeployWorkflow (no I/O)
 app/catalog.py     git-tag catalog, reads variables
 app/schema.py      rules -> JSON Schema, examples  app/activities.py  plan / apply / mark_failed
-app/db.py          SQLite deployments table        app/terraform.py   CLI subprocess wrapper
+app/db.py          records: SQLite or Table         app/terraform.py   CLI subprocess wrapper
 app/auth.py        optional Entra validation       app/worker.py, app/devserver.py
 ```

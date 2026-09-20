@@ -34,7 +34,10 @@ def _env() -> dict[str, str]:
         "ARM_CLIENT_ID": settings.azure_client_id,
     }
     env |= {k: v for k, v in identity.items() if v}
-    if settings.azure_client_certificate_path:
+    if settings.azure_use_managed_identity:
+        # Read by the azurerm and azuread providers and by the azurerm state backend.
+        env["ARM_USE_MSI"] = "true"
+    elif settings.azure_client_certificate_path:
         env["ARM_CLIENT_CERTIFICATE_PATH"] = str(settings.azure_client_certificate_path.resolve())
     return env
 
@@ -73,6 +76,8 @@ def _backend_args(deployment_id: str) -> list[str]:
         "key": f"deployments/{deployment_id}.tfstate",
         "use_azuread_auth": "true",
     }
+    if settings.azure_use_managed_identity:
+        config["use_msi"] = "true"
     return [f"-backend-config={k}={v}" for k, v in config.items()]
 
 
