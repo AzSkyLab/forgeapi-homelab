@@ -34,9 +34,16 @@ def _env() -> dict[str, str]:
         "ARM_CLIENT_ID": settings.azure_client_id,
     }
     env |= {k: v for k, v in identity.items() if v}
-    if settings.azure_use_managed_identity:
-        # Read by the azurerm and azuread providers and by the azurerm state backend.
-        env["ARM_USE_MSI"] = "true"
+    if settings.azure_federated_client_id:
+        # Read by the azurerm and azuread providers and by the azurerm state backend. The token
+        # is short-lived and lives only in this subprocess's environment.
+        from app.azure_identity import federation_token
+
+        env["ARM_USE_OIDC"] = "true"
+        env["ARM_CLIENT_ID"] = settings.azure_federated_client_id
+        env["ARM_OIDC_TOKEN"] = federation_token()
+    elif settings.azure_use_managed_identity:
+        env["ARM_USE_MSI"] = "true"  # VM-style metadata endpoint only; not Container Apps
     elif settings.azure_client_certificate_path:
         env["ARM_CLIENT_CERTIFICATE_PATH"] = str(settings.azure_client_certificate_path.resolve())
     return env
@@ -76,7 +83,9 @@ def _backend_args(deployment_id: str) -> list[str]:
         "key": f"deployments/{deployment_id}.tfstate",
         "use_azuread_auth": "true",
     }
-    if settings.azure_use_managed_identity:
+    if settings.azure_federated_client_id:
+        config["use_oidc"] = "true"
+    elif settings.azure_use_managed_identity:
         config["use_msi"] = "true"
     return [f"-backend-config={k}={v}" for k, v in config.items()]
 

@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     # Hosted on Azure: use the app's managed identity for Terraform (provider and state backend)
     # and for Table Storage. Takes precedence over the certificate.
     azure_use_managed_identity: bool = False
+    # Client ID of a user-assigned managed identity, when the app has one.
+    azure_managed_identity_client_id: str | None = None
+    # Terraform cannot read a Container Apps managed identity itself (it only knows the VM
+    # metadata address). Instead the worker fetches a managed-identity token and Terraform
+    # presents it as a federated credential for this app registration, which holds the Azure
+    # rights. Still no secret.
+    azure_federated_client_id: str | None = None
 
     # Remote state for patterns that declare `backend "azurerm" {}`: one blob per deployment,
     # Entra auth only (no storage keys).

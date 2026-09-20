@@ -18,8 +18,10 @@ case "$action" in
   *) echo "unknown action: $action" >&2; exit 2 ;;
 esac
 
-# Temporal first on the way up, last on the way down.
-[ "$action" = up ] && apps=$(echo "$apps" | sort -r) || apps=$(echo "$apps" | sort)
+# Temporal first on the way up (the worker needs it), last on the way down.
+temporal=$(echo "$apps" | grep -- '-temporal-' || true)
+workers=$(echo "$apps" | grep -v -- '-temporal-' || true)
+[ "$action" = up ] && apps="$temporal $workers" || apps="$workers $temporal"
 for app in $apps; do
   echo "$app -> min replicas $replicas"
   az containerapp update -g "$rg" -n "$app" --min-replicas "$replicas" --max-replicas 1 -o none

@@ -57,6 +57,7 @@ def isolated_settings(tmp_path, monkeypatch, pattern_repo):
     monkeypatch.setattr(settings, "github_token", None)
     monkeypatch.setattr(settings, "db_backend", "sqlite")
     monkeypatch.setattr(settings, "azure_use_managed_identity", False)
+    monkeypatch.setattr(settings, "azure_federated_client_id", None)
     for name in (
         "azure_tenant_id",
         "azure_subscription_id",

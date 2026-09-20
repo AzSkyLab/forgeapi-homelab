@@ -176,3 +176,24 @@ def test_identity_check_example_is_valid_terraform():
     example = Path(__file__).resolve().parent.parent / "examples" / "azure-identity-check"
     terraform._run("dep_check", "init", "-no-color", "-backend=false", f"-from-module={example}")
     terraform._run("dep_check", "validate", "-no-color")
+
+
+def test_federated_identity_handed_to_terraform(monkeypatch):
+    from app import azure_identity
+
+    monkeypatch.setattr(settings, "azure_tenant_id", "tenant")
+    monkeypatch.setattr(settings, "azure_client_id", "ignored-when-federating")
+    monkeypatch.setattr(settings, "azure_use_managed_identity", True)
+    monkeypatch.setattr(settings, "azure_federated_client_id", "terraform-app")
+    monkeypatch.setattr(settings, "state_resource_group", "rg")
+    monkeypatch.setattr(settings, "state_storage_account", "acct")
+    monkeypatch.setattr(azure_identity, "federation_token", lambda: "mi-token")
+
+    env = terraform._env()
+    assert (env["ARM_USE_OIDC"], env["ARM_CLIENT_ID"], env["ARM_OIDC_TOKEN"]) == (
+        "true", "terraform-app", "mi-token",
+    )  # fmt: skip
+    assert "ARM_USE_MSI" not in env and "ARM_CLIENT_CERTIFICATE_PATH" not in env
+    args = terraform._backend_args("dep_x")
+    assert "-backend-config=use_oidc=true" in args and "-backend-config=use_msi=true" not in args
+    assert not any("mi-token" in a for a in args)  # the token never goes on a command line
