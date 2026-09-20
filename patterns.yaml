@@ -10,6 +10,9 @@ patterns:
   resource-group:
     repo: github.com/AzSkyLab/terraform-azurerm-resource-group
     path: pattern
+  # Hosts forgeapi itself on Azure Container Apps. See docs/hosting-plan.md.
+  forgeapi-host:
+    repo: github.com/AzSkyLab/terraform-pattern-forgeapi-host
 
   # Unversioned local example: no cloud, no credentials.
   local-file:

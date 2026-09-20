@@ -24,11 +24,11 @@ One small key-value table, read by ID. The cheapest Postgres Flexible Server is 
 
 ## Build order
 
-1. **Table Storage store** behind `app/db.py` (`FORGEAPI_DB_BACKEND=sqlite|table`). Same contract tests run against both. *Local; tested against the Azurite emulator.*
-2. **Managed identity for Terraform**: `FORGEAPI_AZURE_USE_MANAGED_IDENTITY=true` hands `ARM_USE_MSI` to the provider and backend instead of the certificate; the Table store uses the same identity choice. *Local: settings and env mapping only. Cannot be proven off-Azure.*
+1. ✅ **Table Storage store** behind `app/db.py` (`FORGEAPI_DB_BACKEND=sqlite|table`). Same contract tests run against both. *Local; tested against the Azurite emulator.*
+2. ✅ **Managed identity for Terraform**: `FORGEAPI_AZURE_USE_MANAGED_IDENTITY=true` hands `ARM_USE_MSI` to the provider and backend instead of the certificate; the Table store uses the same identity choice. *Local: settings and env mapping only. Cannot be proven off-Azure.*
 3. **GitHub App token** for pattern repos (replaces `gh auth token`). Needs the engineer to create the App.
-4. **A Terraform pattern that deploys all of this** (`terraform-pattern-forgeapi-host` in its own repo, registered in `patterns.yaml`), so the platform is deployed through the API like any other pattern. First real paid-adjacent resources; needs explicit approval before apply.
-5. `scripts/aca-up.sh` / `aca-down.sh`.
+4. ✅ written, ⏳ not applied: **`AzSkyLab/terraform-pattern-forgeapi-host`** (v0.1.0), registered in `patterns.yaml`, so the platform is deployed through the API like any other pattern. Applying it creates the first hosted resources and needs explicit approval. Image comes from `.github/workflows/image.yml` (GHCR, on `v*` tags or manual run); the package must be made public once.
+5. ✅ `scripts/aca.sh up|down|status <resource-group>` (untested against Azure).
 
 ## Risks to prove first once hosted
 

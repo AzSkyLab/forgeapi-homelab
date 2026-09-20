@@ -162,3 +162,19 @@ Plan: [hosting-plan.md](hosting-plan.md) — Container Apps, scale-to-zero, mana
 **Not verified, cannot be off-Azure:** Table Storage against the real account with Entra auth; Terraform obtaining tokens from a Container Apps managed identity (`IDENTITY_ENDPOINT`, not the VM metadata address). That is the first thing to prove once hosted; fallback is a federated credential trusting the worker's identity.
 
 **Next (needs the engineer):** create the GitHub App for pattern-repo reads (step 3); approve writing and applying the `terraform-pattern-forgeapi-host` pattern (step 4), the first step that creates hosted resources.
+
+## 2026-09-20 — Host pattern written (not applied)
+
+- New private repo `AzSkyLab/terraform-pattern-forgeapi-host`, tag **v0.1.0**: Consumption Container Apps environment (no Log Analytics), `api` (public HTTPS, 0–1 replicas), `worker` (no ingress, 0–1), optional lab `temporal` (internal TCP 7233; omitted when `temporal_address` is given, the work case). System-assigned identities; API → Storage Table Data Contributor only; worker → table, `tfstate` container, and `worker_roles` on `worker_scope`. Optional pattern-repo token via Key Vault reference, never through Terraform state or the API. Terraform ignores `min_replicas` on worker/temporal so the on/off switch is not fought.
+- Registered as `forgeapi-host` in `patterns.yaml`. `.github/workflows/image.yml` publishes the image to GHCR on `v*` tags or manual run. `scripts/aca.sh up|down|status`.
+
+| Check | Result |
+| --- | --- |
+| `terraform fmt` / `init -backend=false` / `validate` on the pattern | PASS |
+| `GET /patterns/forgeapi-host` (Docker API, private repo) | PASS: v0.1.0, `about` and costs from its `config.yaml`, 7 required inputs, generated example |
+| Dry run with `image=forgeapi:latest` | PASS: 422 with the pattern's own message; nothing created |
+| `uv run pytest` | PASS: 57 |
+
+**Not done / not verified:** no `terraform plan` or apply of the host pattern; image never built or pushed (workflow not yet on the default branch or run); `scripts/aca.sh` only syntax-checked; ACA managed-identity token acquisition by Terraform and internal TCP ingress for Temporal remain the two hosting unknowns; Graph permissions for the worker identity are a manual directory-admin step after apply.
+
+**Next (engineer):** push `aca-hosting`, publish an image (tag or manual workflow run, then make the GHCR package public), then approve deploying `forgeapi-host`.
