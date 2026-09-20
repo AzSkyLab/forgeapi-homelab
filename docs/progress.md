@@ -247,3 +247,21 @@ Dry run of the final `forgeapi-host` request (with `entra_audience`) is valid. *
 **Created outside Terraform:** `Microsoft.App` provider registration; Key Vault `kv-forgeapi-host-38b9` in `forgeapitestRG01` (RBAC, empty) with Secrets Officer for the engineer, to hold a read-only pattern-repo token. Kept out of the host resource group on purpose so destroying the host does not trip over an unmanaged resource.
 
 **Pending, engineer:** create a fine-grained read-only GitHub token and store it in the vault; then `PUT` the host deployment with `github_token_secret_id` + `github_token_key_vault_id`, `aca.sh up`, and deploy `resource-group` through the hosted API (first real pattern from a private repo, hosted). Worker and Temporal are currently **down** (free).
+
+## 2026-09-20 — Last leg: private pattern deployed entirely from Azure
+
+- Engineer stored a fine-grained, read-only, 30-day GitHub token in `kv-forgeapi-host-38b9` (`pattern-repo-token`); the assistant only ever listed the secret's metadata.
+- First `PUT` with the Key Vault inputs **failed twice**: deadlock in pattern v0.2.0. The API's identity was system-assigned, so the Key Vault role depended on the app, and the app could not update without reading the secret. Fixed in **v0.2.1**: both identities user-assigned, roles granted first, 90 s propagation wait, apps last. `PUT {"version":"v0.2.1"}` from the failed state: `5 to add, 4 to change, 1 to destroy`, `succeeded`. Worker identity unchanged, so the federation trust still held.
+
+| Check (hosted) | Result |
+| --- | --- |
+| `GET /patterns/{resource-group,key-vault,forgeapi-host}` | PASS: tags read from the private repos using the Key Vault-referenced token |
+| `resource-group` v1.1.0 (`44c86077`) deployed through the hosted API | PASS: `succeeded` in ~65 s. Private repo + private module fetch, federated sign-in, remote state, all from Container Apps |
+| `az group show` (human identity) | PASS: `rg-forgeapi-resource-group-dev` Succeeded with pattern tags |
+| Token in hosted deployment logs | none |
+| `DELETE` through the hosted API | PASS: `destroyed`; resource group gone |
+| `aca.sh down` | worker and Temporal at 0 replicas (free) |
+
+**Hosting plan status:** every step done and verified except a GitHub App (the lab uses a Key Vault-held read-only token instead). Open question for work: pattern-repo access without anyone holding a key; see the options given to the engineer (GitHub App owned by the platform team, or publishing pattern release artifacts to Azure storage from GitHub Actions via OIDC so the worker never talks to GitHub).
+
+**Live now:** `rg-forgeapi-forgeapi-host-dev` (environment, 3 apps, 2 identities; idle ≈ $0), `stforgeapitf6c68`, `kv-forgeapi-host-38b9`, plus the two old demo vaults and unused UAMI the engineer still has to delete by hand. Certificate for local runs expires 2026-09-27; the token expires in 30 days.
