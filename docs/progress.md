@@ -297,3 +297,24 @@ Engineer requirement: end users must not know where resources go; the platform m
 **Finding for the pattern repos:** key-vault's `config.yaml` sizes use `dev/staging/prod` but environments are `prototype/dev/tst/stg/prd`, so no size is offered in `stg`/`prd` until the keys match. Patterns also need to declare `private_endpoint_subnet_id` (etc.) to receive network values.
 
 **Not verified:** real group claims from Entra or Easy Auth (unit tests only); two real subscriptions; anything hosted. **Not built:** quotas, prd approvals, per-version limits, admin API/database for the mapping.
+
+## 2026-09-20 — Business units proven end to end on the hosted lab copy
+
+**Setup:** image `v0.2.0`; host pattern **v0.3.0** (`tenants_yaml` → `FORGEAPI_TENANTS_YAML` on the API only; added because the mapping is gitignored and cannot be in a CI-built image); key-vault **v1.1.5** (PR #2: sizing keys `dev/stg/prd`); Entra security groups `forgeapi-lab-platform-devs` (the engineer), `forgeapi-lab-platform-release` (empty on purpose), `forgeapi-lab-hr-devs` (the lab service principal); API app registration `groupMembershipClaims = SecurityGroup`. Host updated in place with `PUT` (`0 add, 4 change, 0 destroy`). One subscription backs every environment in the lab.
+
+| Check (hosted API, real Entra tokens) | Result |
+| --- | --- |
+| Token issued before group claims were enabled (Azure CLI cache) | no `groups` claim → `/me` empty, no patterns. Correct fail-closed behaviour; a fresh token carried 23 groups, no overage |
+| `/me` and `/patterns` as the engineer | `platform`, deploy to `dev` only (not in release group), 4 patterns |
+| Refusals | no environment 422; `prd` 403; caller-set `cost_center` 422; `westeurope` 422 with the BU's region message; `business_unit: hr` 403 |
+| Real `resource-group` deployment, `dev` | `succeeded`; request contained no BU, cost centre or region. **Azure shows tags `BusinessUnit=platform`, `CostCenter=CC-0001`, location `centralus`** (BU default, not the pattern's `eastus`). Subscription absent from the API response |
+| Second real caller: service principal token (app-only, `groups` claim present) | `/me` → `hr`; sees only `resource-group`; lists 0 deployments; GET / logs / DELETE of platform's deployment → **404**; `key-vault` → 403; dry run injects `hr` / `CC-2000` |
+| Sizes, key-vault v1.1.5 | page offers `small, medium, large` in `dev` and hides `environment`, `business_unit`, `cost_center`, `sku_name`; no size 422; `xl` 422; size + own `sku_name` 422 |
+| Real `key-vault` deployment, `size: small` | `succeeded`; **Azure shows SKU `standard`** and the platform tags |
+| Cleanup through the API | both `destroyed`; resource groups and Entra `sg-` groups gone; worker and Temporal at 0 replicas |
+
+**Observations:** Terraform outputs such as resource IDs naturally contain the subscription ID; only the platform's own fields hide it. One status poll during destroy returned a non-JSON body (next poll fine); not investigated. Machine callers work: a service principal in a BU group is a valid caller, which is how pipelines would use the API.
+
+**Not verified:** two genuinely different subscriptions; Easy Auth's header in a real Easy Auth deployment; group overage handling against a real over-limit user; a caller in two BUs with real tokens (unit-tested).
+
+**Left in the lab:** the three `forgeapi-lab-*` Entra groups and the group-claims setting on the API app registration (needed for further demos).
