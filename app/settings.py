@@ -26,6 +26,9 @@ class Settings(BaseSettings):
 
     # Business-unit mapping (docs/tenancy.md). Unset: single-tenant, no placement or ownership.
     tenants_path: Path | None = None
+    # The same mapping as text, for hosts where the file cannot be baked into the image (it is
+    # tenant-specific). Takes precedence over the path. Can come from a Key Vault reference.
+    tenants_yaml: str | None = None
     dev_groups: str = ""  # comma-separated group IDs the caller has when auth_mode is "none"
 
     # Where deployment records live. "table" is Azure Table Storage, for hosting.

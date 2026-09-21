@@ -338,3 +338,12 @@ def git_commit() -> str:
     from app import catalog
 
     return catalog.resolve("sized", "v1.0.0").commit
+
+
+def test_mapping_can_be_supplied_as_text_instead_of_a_file(client, monkeypatch):
+    text = settings.tenants_path.read_text()
+    monkeypatch.setattr(settings, "tenants_path", None)
+    assert client.get("/me").json()["business_units"] is None  # business units off
+
+    monkeypatch.setattr(settings, "tenants_yaml", text)
+    assert [u["name"] for u in client.get("/me").json()["business_units"]] == ["finance"]

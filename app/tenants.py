@@ -56,11 +56,12 @@ class Placement:
 
 
 def enabled() -> bool:
-    return settings.tenants_path is not None
+    return bool(settings.tenants_yaml) or settings.tenants_path is not None
 
 
 def load() -> dict[str, BusinessUnit]:
-    raw = yaml.safe_load(settings.tenants_path.read_text()) or {}
+    text = settings.tenants_yaml or settings.tenants_path.read_text()
+    raw = yaml.safe_load(text) or {}
     units = {}
     for name, spec in (raw.get("business_units") or {}).items():
         regions = spec.get("regions") or {}
