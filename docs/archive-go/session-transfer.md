@@ -1,6 +1,8 @@
 # New machine / new session — start here
 
-**Outcome:** continue from the repository, not chat memory. Start a fresh local core environment on the destination; do not move or resume the existing Azure deployment by accident. At this handoff, the inspected implementation was committed as `3a2b74a`; include subsequent handoff-document changes in the source you transfer. No commit/push is performed by these instructions.
+**Outcome:** continue from the repository, not chat memory. Start a fresh local core environment on the destination; do not move or resume the existing Azure deployment by accident. The implementation checkpoint was `3a2b74a`; the handoff documents are committed in `ddbc9c2`. Include subsequent source/document changes in the source you transfer and compare the actual destination revision. No commit/push is performed by these instructions.
+
+**Windows handover reviewed — 2026-09-08:** local core setup is verified on Ubuntu-24.04 under Windows WSL2, x86_64, at `/home/cam/code/forgeapi-homelab`. The retained verification retry log records passing containerized unit/race and real PostgreSQL/Temporal tests, followed by the real Entra walkthrough's `PASS: local walkthrough complete`. The initial migration attempt failed; the subsequent full verification succeeded. The API, synthetic worker, PostgreSQL, Temporal and collector are running. See [progress](progress.md) for sanitized evidence and limits. Continue local feature work here; repeat destination setup below when moving to macOS. Actual Mac execution remains unverified.
 
 **Adding more Terraform patterns?** The concrete development task is [PAT-01: Add the Terraform pattern interface and registry](#pat-01-add-the-terraform-pattern-interface-and-registry). The machine-setup prompt at the end deliberately stops after setup; use the PAT-01 prompt when you choose to start that refactor.
 
