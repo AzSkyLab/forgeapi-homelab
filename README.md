@@ -103,6 +103,7 @@ app/schema.py      rules -> JSON Schema, examples  app/activities.py  plan / app
 app/tenants.py     business-unit mapping
 app/placement.py   injected inputs, sizes
 app/budgets.py     estimated cost budgets
-app/db.py          records: SQLite or Table         app/terraform.py   CLI subprocess wrapper
+app/db.py          records: SQLite or Table         app/terraform.py   CLI wrapper, cache gate
+app/logs.py        logs: file or Table chunks
 app/auth.py        who is calling + groups         app/worker.py, app/devserver.py
 ```

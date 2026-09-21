@@ -24,5 +24,6 @@ workers=$(echo "$apps" | grep -v -- '-temporal-' || true)
 [ "$action" = up ] && apps="$temporal $workers" || apps="$workers $temporal"
 for app in $apps; do
   echo "$app -> min replicas $replicas"
-  az containerapp update -g "$rg" -n "$app" --min-replicas "$replicas" --max-replicas 1 -o none
+  # Only the minimum: the maximum belongs to the host pattern (worker_max_replicas).
+  az containerapp update -g "$rg" -n "$app" --min-replicas "$replicas" -o none
 done
