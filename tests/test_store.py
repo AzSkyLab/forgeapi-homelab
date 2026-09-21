@@ -157,3 +157,34 @@ def test_logs_are_readable_from_the_shared_store(store, monkeypatch, tmp_path):
     assert len(text) == len("$ terraform plan\nfirst\n") + 70_000 + len("\nlast\n")
     assert "someone else's" not in text
     assert logs.read("dep_none") == ""
+
+
+def test_audit_events_round_trip_and_are_scoped(store):
+    from datetime import UTC, datetime, timedelta
+
+    from app import audit
+
+    first = audit.record("deployment.create", "accepted", "user-1", deployment_id="dep_a",
+                         pattern="demo", version="v1", business_unit="finance", environment="dev",
+                         detail={"inputs": {"n": 1}, "injected": {"cc": "X"}})  # fmt: skip
+    audit.record("deployment.create", "refused", "user-2", status=403, business_unit="hr's",
+                 detail={"reason": {"message": "over budget", "available": 0.5}})  # fmt: skip
+    audit.record("deployment.state", "succeeded", "worker", deployment_id="dep_a",
+                 business_unit="finance")  # fmt: skip
+    audit.record("deployment.create", "accepted", "local")  # single-tenant: no business unit
+
+    finance = audit.query(["finance"], None, 10)
+    assert [(e.action, e.outcome) for e in finance] == [
+        ("deployment.state", "succeeded"), ("deployment.create", "accepted"),
+    ]  # fmt: skip
+    assert finance[1] == first and finance[1].detail["injected"] == {"cc": "X"}
+    [refusal] = audit.query(["hr's"], None, 10)
+    assert refusal.status == 403 and refusal.detail["reason"]["available"] == 0.5
+    assert len(audit.query(None, None, 10)) == 4 and audit.query([], None, 10) == []
+    assert len(audit.query(None, None, 2)) == 2
+    assert [e.outcome for e in audit.for_deployment("dep_a", "finance")] == [
+        "succeeded",
+        "accepted",
+    ]
+    assert audit.for_deployment("dep_a", "hr's") == []
+    assert audit.query(None, datetime.now(UTC) + timedelta(minutes=1), 10) == []

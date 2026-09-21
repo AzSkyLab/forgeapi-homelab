@@ -61,6 +61,7 @@ patterns:
 | `POST /deployments?dry_run=true` | checks a request and creates nothing |
 | `POST /deployments/{id}/retry` | re-runs a failed deployment against the same commit, inputs and state; Terraform finishes what is missing |
 | `PUT /deployments/{id}` | change inputs and/or pattern version and apply the difference against the existing state (`inputs` replaces the whole set; omit to keep) |
+| `GET /deployments/{id}/events`, `GET /events` | audit trail: every accepted action, refusal, denied access and final outcome ([docs/audit.md](docs/audit.md)) |
 | `DELETE /deployments/{id}` | `terraform destroy` from the deployment's state; the record is kept as `destroyed` |
 | `POST /deployments {"pattern","version","inputs"}` | `version` optional (latest tag). The tag is resolved to a commit at acceptance; that commit is what runs, even if the tag later moves |
 
@@ -103,6 +104,7 @@ app/schema.py      rules -> JSON Schema, examples  app/activities.py  plan / app
 app/tenants.py     business-unit mapping
 app/placement.py   injected inputs, sizes
 app/budgets.py     estimated cost budgets
+app/audit.py       append-only audit events
 app/db.py          records: SQLite or Table         app/terraform.py   CLI wrapper, cache gate
 app/logs.py        logs: file or Table chunks
 app/auth.py        who is calling + groups         app/worker.py, app/devserver.py

@@ -387,3 +387,15 @@ PR #3 (`multi-worker`) merged to `main`; branch deleted after a containment chec
 **Cost:** the Cost Management query was rate-limited (429), and usage takes 8–24 h to appear, so the actual figure is unknown. The Container Apps monthly free grant (180,000 vCPU-s, 360,000 GiB-s) likely covers it: ~7 h × 0.75 vCPU ≈ 19,000 vCPU-s and ≈ 38,000 GiB-s. To be checked in the portal tomorrow.
 
 **Everything in the subscription now:** host RG (environment, 3 apps at 0 running replicas, 2 identities: no charge while stopped); `forgeapitestRG01` (state storage account: pennies; three Key Vaults and one unused identity: no standing charge); another project's `rg-cg26091947f163` (FlexConsumption function app with 0 workers, two storage accounts, App Insights) and the default Log Analytics workspace (pay per GB ingested), none created by this work.
+
+## 2026-09-20 — Audit trail (branch `audit-log`)
+
+PR #4 (`aca.sh down` fix) merged to `main`. Engineer chose the audit log from the list of next features.
+
+**Built:** `app/audit.py` and hooks in every mutating route, in access checks and in the worker. Design, guarantees and limits: [audit.md](audit.md). Accepted actions are recorded before dispatch and fail closed (503, nothing started); refusals, denied access and worker outcomes are recorded best-effort with a logged warning on failure; dry runs are not recorded; sensitive input values are redacted; auditors (mapping `auditors:` groups) read every unit's events and nothing else; `GET /deployments/{id}/events`, `GET /events`.
+
+| Check | Result |
+| --- | --- |
+| `uv run pytest` / `ruff` | PASS: 109 / clean. 11 audit tests: event content and injected values, redaction of a `sensitive` variable, refusals with the caller-visible reason (permission, invalid input, budget figures), dry runs leave no trace, full lifecycle order, worker success and failure outcomes from real Terraform runs, probing another unit's deployment is filed under its owners and invisible to the prober, auditor scope, fail-closed when the store is down, every `events` route is GET-only; event store contract on SQLite **and** Table Storage (Azurite) |
+
+**Known gaps recorded in audit.md:** storage is not immutable; deployment records still hold sensitive inputs in clear; cross-process ordering within milliseconds; no retention/export. **Not verified:** the hosted copy.

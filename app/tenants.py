@@ -87,6 +87,14 @@ def load() -> dict[str, BusinessUnit]:
     return units
 
 
+def is_auditor(caller: Caller) -> bool:
+    """Members of the mapping's top-level `auditors` groups may read every unit's audit events
+    (and nothing else: no deployments, no changes)."""
+    text = settings.tenants_yaml or settings.tenants_path.read_text()
+    auditors = (yaml.safe_load(text) or {}).get("auditors") or []
+    return bool(caller.groups & frozenset(auditors))
+
+
 def units_for(caller: Caller) -> list[BusinessUnit]:
     return [unit for unit in load().values() if unit.includes(caller)]
 
