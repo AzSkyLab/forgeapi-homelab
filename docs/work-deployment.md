@@ -8,7 +8,7 @@ You are deploying **forgeapi** into an existing, private Azure Container Apps en
 - **Read before you write.** Do the checks in [Step 0](#step-0-discover-and-verify-read-only) before creating anything.
 - **Never print, log or paste secrets** (private keys, tokens). Reference them by Key Vault secret name only.
 - **Stop and ask the engineer** before: creating or changing role assignments, touching anything outside the three apps named here, deploying any real pattern (anything except `local-file` and `azure-identity-check`), or when a verification step fails twice.
-- Do not run `uv`, tests or local Docker. Local development is deliberately skipped at work; the code is already tested (71 tests in the lab).
+- Do not run `uv`, tests or local Docker. Local development is deliberately skipped at work; the code is already tested (86 tests in the lab).
 - Report at the end using the [report format](#report-format). State plainly what was verified and what was not.
 
 ## What you are deploying
@@ -38,6 +38,7 @@ Ask for any that are missing. Do not guess.
 | GitHub access: either GitHub App ID + installation ID + Key Vault secret holding the App private key (PEM), **or** a Key Vault secret holding a read-only machine token | The MCP server gives the app a Key Vault; the secret is referenced, never copied. |
 | Whether GitHub is github.com or GitHub Enterprise Server | GHES needs two extra settings (below). |
 | Egress allowlist status | See [Step 1](#step-1-egress). |
+| Business-unit mapping: for each BU its Entra group IDs, cost centre, allowed patterns and regions, and per environment the subscription ID and network IDs | Goes in `tenants.yaml` (see `tenants.example.yaml`, `docs/tenancy.md`). Baked into the image like `patterns.yaml`. The worker identity needs its deploy rights in **every** mapped subscription. |
 
 ## Step 0: discover and verify (read-only)
 
@@ -64,7 +65,7 @@ If the Terraform registry cannot be allowlisted, stop and report. The known fix 
 
 ## Step 2: edit the catalog, then build
 
-`patterns.yaml` is baked into the image. Replace the lab entries with the work pattern repos **before** building. Keep the two built-in examples; they are your verification tools.
+`patterns.yaml` and `tenants.yaml` are baked into the image (add `COPY tenants.yaml ./` next to the `patterns.yaml` line in the `Dockerfile` and `!tenants.yaml` to `.dockerignore`; the file is gitignored because it holds tenant-specific IDs, so the engineer supplies it). Replace the lab entries with the work pattern repos **before** building. Keep the two built-in examples; they are your verification tools.
 
 ```yaml
 patterns:
@@ -110,7 +111,8 @@ Environment (worker **and** API get all of these; differences noted):
 | `FORGEAPI_STATE_RESOURCE_GROUP` | state storage resource group |
 | `FORGEAPI_STATE_STORAGE_ACCOUNT` | state storage account name |
 | `FORGEAPI_STATE_CONTAINER` | `tfstate` |
-| `FORGEAPI_AUTH_MODE` | `none` (see Step 5) |
+| `FORGEAPI_AUTH_MODE` | `easyauth` (see Step 5) |
+| `FORGEAPI_TENANTS_PATH` | `tenants.yaml` |
 | GitHub App: `FORGEAPI_GITHUB_APP_ID`, `FORGEAPI_GITHUB_APP_INSTALLATION_ID`, and `FORGEAPI_GITHUB_APP_PRIVATE_KEY` **as a Key Vault secret reference** | preferred |
 | …or machine token: `FORGEAPI_GITHUB_TOKEN` **as a Key Vault secret reference** | alternative |
 | GHES only: `FORGEAPI_GITHUB_HOST` = `<host>`, `FORGEAPI_GITHUB_API_URL` = `https://<host>/api/v3` | omit for github.com |
@@ -123,7 +125,7 @@ Why managed identity works here: Terraform can only ask the VM metadata address 
 
 `forgeapi-api`: same image, command `uvicorn app.main:app --host 0.0.0.0 --port 8000`, HTTP ingress on 8000 behind the private endpoint, Easy Auth as the MCP server configures it, same env vars, identity attached (it needs the table role and Key Vault secret access; it never runs Terraform).
 
-Auth: with Easy Auth in front and a private endpoint, leave `FORGEAPI_AUTH_MODE=none`. Every caller that reaches the app has already signed in to the tenant. Anyone who can reach and sign in can deploy with the worker identity's rights, so ask the engineer whether Easy Auth should be restricted to a specific group. (The app's own `entra` mode also exists: set `FORGEAPI_AUTH_MODE=entra`, `FORGEAPI_ENTRA_TENANT_ID`, and `FORGEAPI_ENTRA_AUDIENCE` = the **client ID** of the Easy Auth app registration, which requires that registration to issue v2 tokens. Only do this if asked.)
+Auth: set `FORGEAPI_AUTH_MODE=easyauth`. Easy Auth signs the caller in and passes their identity and Entra groups to the app in the `X-MS-CLIENT-PRINCIPAL` header (it strips any copy a client sends, which is why this mode is only safe behind Easy Auth; never use it on an app without it). The business-unit mapping then decides what that caller may deploy and where. **The Easy Auth app registration must emit group claims** (token configuration → groups claim → *Groups assigned to the application*, which also avoids the too-many-groups overage); confirm this with the engineer, and verify with `GET /me` that the caller's business units appear. (The app's own `entra` mode also exists: set `FORGEAPI_AUTH_MODE=entra`, `FORGEAPI_ENTRA_TENANT_ID`, and `FORGEAPI_ENTRA_AUDIENCE` = the **client ID** of the Easy Auth app registration, which requires that registration to issue v2 tokens. Only do this if asked.)
 
 `/healthz` needs no token and is safe for probes.
 
@@ -132,10 +134,11 @@ Auth: with Easy Auth in front and a private endpoint, leave `FORGEAPI_AUTH_MODE=
 Call the API through whatever authenticated path Easy Auth allows (ask the engineer how they obtain a token or session). Stop at the first failure and consult [Troubleshooting](#troubleshooting).
 
 1. `GET /healthz` → `200 {"status":"ok"}`.
-2. `GET /patterns` → lists the catalog.
+2. `GET /me` → the caller's business units, environments and patterns. Empty means group claims are not reaching the app or the mapping has the wrong group IDs.
+2b. `GET /patterns` → only the patterns the caller's business units allow.
 3. `GET /patterns/<a real pattern>` → versions (tags) and inputs. Proves GitHub access. `502` means it does not work yet.
-4. `POST /deployments` `{"pattern":"local-file","inputs":{"filename":"hello.txt","content":"hi"}}`, poll `GET /deployments/<id>` until `succeeded`. Proves API → Table Storage → Temporal → worker → Terraform, with no Azure sign-in involved.
-5. `POST /deployments` `{"pattern":"azure-identity-check","inputs":{"note":"work identity test"}}` → `succeeded`, and **`outputs.signed_in_object_id` equals the identity's principal (object) ID**. This pattern creates nothing; it proves Terraform signs in as the identity and can write remote state.
+4. `POST /deployments` `{"pattern":"local-file","environment":"<env>","inputs":{"filename":"hello.txt","content":"hi"}}` (the two example patterns must be listed under a business unit's `patterns` for this), poll `GET /deployments/<id>` until `succeeded`. Proves API → Table Storage → Temporal → worker → Terraform, with no Azure sign-in involved.
+5. `POST /deployments` `{"pattern":"azure-identity-check","environment":"<env>","inputs":{"note":"work identity test"}}` → `succeeded`, and **`outputs.signed_in_object_id` equals the identity's principal (object) ID**. This pattern creates nothing; it proves Terraform signs in as the identity and can write remote state.
 6. `DELETE /deployments/<id>` for both; each ends `destroyed`.
 7. `POST /deployments?dry_run=true` with a real pattern and the engineer's inputs → `{"valid": true}`. Creates nothing.
 8. **Only with the engineer's explicit go-ahead:** deploy one real, cheap pattern; verify the resource independently; `DELETE` it.
@@ -171,7 +174,7 @@ Every entry below actually happened in the lab.
 ## Known limits to tell the engineer about
 
 - One worker replica, one target subscription per worker, in-memory Temporal history.
-- Any authenticated caller can deploy any catalog pattern with the worker identity's rights; there is no per-user authorization yet. Reusing a GitHub-runner identity means API callers inherit that identity's reach. A dedicated identity with narrower rights is the better long-term choice.
+- Authorization is by business unit and environment (Entra groups). There are no quotas, approvals or per-pattern-version limits yet. Reusing a GitHub-runner identity means API callers inherit that identity's reach. A dedicated identity with narrower rights is the better long-term choice.
 - GitHub App token support is unit-tested only; it has not been run against a real App. A machine token through a Key Vault reference **has** been proven end to end.
 - The Terraform provider mirror for fully closed egress is not built.
 - Moving to the AKS Temporal later: change `FORGEAPI_TEMPORAL_ADDRESS`/`NAMESPACE` on both apps and delete `forgeapi-temporal`. Connections needing mTLS or an API key are not supported by the code yet.

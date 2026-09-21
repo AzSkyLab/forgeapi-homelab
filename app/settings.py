@@ -17,10 +17,16 @@ class Settings(BaseSettings):
     temporal_namespace: str = "default"
     task_queue: str = "forgeapi"
 
-    # "none" is for loopback development only. "entra" requires the two values below.
-    auth_mode: Literal["none", "entra"] = "none"
+    # "none": loopback development only. "entra": validate bearer tokens (two values below).
+    # "easyauth": trust the identity header Container Apps / App Service Easy Auth adds; only safe
+    # when Easy Auth is in front, because it strips client-supplied copies of that header.
+    auth_mode: Literal["none", "entra", "easyauth"] = "none"
     entra_tenant_id: str | None = None
     entra_audience: str | None = None
+
+    # Business-unit mapping (docs/tenancy.md). Unset: single-tenant, no placement or ownership.
+    tenants_path: Path | None = None
+    dev_groups: str = ""  # comma-separated group IDs the caller has when auth_mode is "none"
 
     # Where deployment records live. "table" is Azure Table Storage, for hosting.
     db_backend: Literal["sqlite", "table"] = "sqlite"

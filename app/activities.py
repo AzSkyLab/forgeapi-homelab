@@ -12,17 +12,24 @@ def _source(deployment) -> str:
     return catalog.Resolved(pattern, deployment.version, deployment.commit).terraform_source
 
 
+def _variables(deployment) -> dict:
+    # Platform-injected values win over anything the caller sent under the same name.
+    return {**deployment.inputs, **(deployment.injected or {})}
+
+
 @activity.defn
 def plan(deployment_id: str) -> None:
     deployment = db.get(deployment_id)
     db.update(deployment_id, State.planning)
-    terraform.plan(deployment_id, _source(deployment), deployment.inputs)
+    terraform.plan(
+        deployment_id, _source(deployment), _variables(deployment), deployment.subscription_id
+    )
 
 
 @activity.defn
 def apply(deployment_id: str) -> None:
     db.update(deployment_id, State.applying)
-    outputs = terraform.apply(deployment_id)
+    outputs = terraform.apply(deployment_id, db.get(deployment_id).subscription_id)
     db.update(deployment_id, State.succeeded, outputs=outputs)
 
 
@@ -35,7 +42,9 @@ def mark_failed(deployment_id: str, error: str) -> None:
 def destroy(deployment_id: str) -> None:
     deployment = db.get(deployment_id)
     db.update(deployment_id, State.destroying)
-    terraform.destroy(deployment_id, _source(deployment), deployment.inputs)
+    terraform.destroy(
+        deployment_id, _source(deployment), _variables(deployment), deployment.subscription_id
+    )
     db.update(deployment_id, State.destroyed)
 
 

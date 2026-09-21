@@ -15,6 +15,7 @@ from app.models import Deployment, State
 from app.settings import settings
 
 _PARTITION = "deployment"
+_PLACEMENT = ("business_unit", "environment", "subscription_id", "size", "requested_by")
 _ensured: set[str] = set()  # tables this process has already made sure exist
 
 
@@ -52,6 +53,8 @@ def insert(d: Deployment) -> None:
                 "state": str(d.state),
                 "outputs": "",
                 "error": "",
+                **{name: getattr(d, name) or "" for name in _PLACEMENT},
+                "injected": json.dumps(d.injected) if d.injected is not None else "",
                 "created_at": d.created_at.isoformat(),
                 "updated_at": d.updated_at.isoformat(),
             }
@@ -61,9 +64,27 @@ def insert(d: Deployment) -> None:
 def get(deployment_id: str) -> Deployment | None:
     with _table() as table:
         try:
-            e = table.get_entity(_PARTITION, deployment_id)
+            return _to_deployment(table.get_entity(_PARTITION, deployment_id))
         except ResourceNotFoundError:
             return None
+
+
+def list_for(business_units: list[str] | None) -> list[Deployment]:
+    if business_units is not None and not business_units:
+        return []
+    names = business_units or []
+    parameters = {"pk": _PARTITION, **{f"bu{i}": name for i, name in enumerate(names)}}
+    query = "PartitionKey eq @pk"
+    if names:
+        # Spaces around the parentheses matter: the SDK reads a parameter name up to the next space.
+        any_unit = " or ".join(f"business_unit eq @bu{i}" for i in range(len(names)))
+        query += f" and ( {any_unit} )"
+    with _table() as table:
+        found = [_to_deployment(e) for e in table.query_entities(query, parameters=parameters)]
+    return sorted(found, key=lambda d: d.created_at, reverse=True)
+
+
+def _to_deployment(e) -> Deployment:
     return Deployment(
         id=e["RowKey"],
         pattern=e["pattern"],
@@ -75,6 +96,8 @@ def get(deployment_id: str) -> Deployment | None:
         error=e["error"] or None,
         created_at=e["created_at"],
         updated_at=e["updated_at"],
+        **{name: e.get(name) or None for name in _PLACEMENT},
+        injected=json.loads(e["injected"]) if e.get("injected") else None,
     )
 
 
@@ -104,6 +127,8 @@ def respec(
     inputs: dict[str, Any],
     version: str | None,
     commit: str | None,
+    size: str | None,
+    injected: dict[str, Any] | None,
     now: datetime,
 ) -> None:
     changes = {
@@ -112,6 +137,8 @@ def respec(
         "inputs": json.dumps(inputs),
         "version": version or "",
         "commit_sha": commit or "",
+        "size": size or "",
+        "injected": json.dumps(injected) if injected is not None else "",
         "updated_at": now.isoformat(),
     }
     with _table() as table, contextlib.suppress(ResourceNotFoundError):

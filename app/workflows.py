@@ -20,17 +20,22 @@ class DeployWorkflow:
     async def run(self, deployment_id: str) -> str:
         try:
             await workflow.execute_activity(
-                activities.plan, deployment_id,
-                start_to_close_timeout=timedelta(minutes=10), retry_policy=_ONCE,
+                activities.plan,
+                deployment_id,
+                start_to_close_timeout=timedelta(minutes=10),
+                retry_policy=_ONCE,
             )
             await workflow.execute_activity(
-                activities.apply, deployment_id,
-                start_to_close_timeout=timedelta(minutes=30), retry_policy=_ONCE,
+                activities.apply,
+                deployment_id,
+                start_to_close_timeout=timedelta(minutes=30),
+                retry_policy=_ONCE,
             )
         except ActivityError as err:
             message = str(getattr(err.cause, "message", None) or err.cause or err)
             await workflow.execute_activity(
-                activities.mark_failed, args=[deployment_id, message],
+                activities.mark_failed,
+                args=[deployment_id, message],
                 start_to_close_timeout=timedelta(seconds=30),
             )
             return "failed"

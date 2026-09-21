@@ -97,8 +97,17 @@ def describe(variable: dict[str, Any]) -> dict[str, Any]:
     shown = {k: v for k, v in variable.items() if k != "validations"}
     if "enum" in rules:
         shown["allowed_values"] = rules["enum"]
-    for key in ("pattern", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
-                "minLength", "maxLength", "minItems", "maxItems"):
+    for key in (
+        "pattern",
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+    ):
         if key in rules:
             shown[key] = _tidy(rules[key]) if isinstance(rules[key], float) else rules[key]
     shown["rules"] = [v["error_message"] for v in variable["validations"]]

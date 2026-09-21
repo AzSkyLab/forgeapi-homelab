@@ -103,3 +103,36 @@ def test_respec_changes_what_the_deployment_should_be(store):
     assert changed.inputs == {"a": 2, "b": "new"}
     assert (changed.version, changed.commit) == ("v1.1.0", "bbb")
     assert changed.state == State.succeeded and changed.outputs == {"kept": True}
+
+
+def test_placement_fields_round_trip_and_listing_is_scoped(store):
+    injected = {"cost_center": "CC-1", "tags": {"a": "b"}}
+    fin = db.create(
+        "demo", {"n": 1}, "v1", "abc", business_unit="finance", environment="dev",
+        subscription_id="sub-1", size="small", injected=injected, requested_by="user-1",
+    )  # fmt: skip
+    hr = db.create("demo", {}, business_unit="hr's", environment="dev", subscription_id="sub-2")
+    legacy = db.create("demo", {})
+
+    loaded = db.get(fin.id)
+    assert loaded == fin
+    assert (loaded.business_unit, loaded.environment, loaded.subscription_id) == (
+        "finance", "dev", "sub-1",
+    )  # fmt: skip
+    assert loaded.size == "small" and loaded.injected == injected
+    assert loaded.requested_by == "user-1"
+    assert db.get(legacy.id).business_unit is None and db.get(legacy.id).injected is None
+
+    assert [d.id for d in db.list_for(["finance"])] == [fin.id]
+    assert {d.id for d in db.list_for(["finance", "hr's"])} == {fin.id, hr.id}  # quote-safe
+    assert db.list_for([]) == []
+    assert {fin.id, hr.id, legacy.id} <= {d.id for d in db.list_for(None)}
+
+    db.respec(fin.id, {"n": 2}, "v2", "def", "large", {"cost_center": "CC-2"})
+    changed = db.get(fin.id)
+    assert (changed.size, changed.injected, changed.version) == (
+        "large",
+        {"cost_center": "CC-2"},
+        "v2",
+    )
+    assert changed.business_unit == "finance" and changed.subscription_id == "sub-1"

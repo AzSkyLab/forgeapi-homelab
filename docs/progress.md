@@ -281,3 +281,19 @@ Engineer decision: skip local dev at work; deploy with the organisation's MCP se
 **Not verified:** GitHub App tokens against a real App (unit tests only); anything in the work environment; Easy Auth in front of the API; provider downloads under restricted egress (provider mirror not built); Temporal UI behind Easy Auth.
 
 **Newly documented limit:** the worker must run as exactly one replica, because plan and apply are separate activities sharing a local workspace.
+
+## 2026-09-20 — Business units: placement, injected inputs, sizes, ownership (branch `tenancy`)
+
+Engineer requirement: end users must not know where resources go; the platform maps callers to a business unit and the business unit + environment to a subscription, set up when access is granted. Decisions and rules: [tenancy.md](tenancy.md).
+
+**Built:** `app/tenants.py` (YAML mapping behind functions, to move to a database at work), `app/placement.py`, caller identity with Entra groups from the token, from Easy Auth's `X-MS-CLIENT-PRINCIPAL` (`FORGEAPI_AUTH_MODE=easyauth`) or `FORGEAPI_DEV_GROUPS` locally. Request gains `business_unit` (only when the caller has several), `environment`, `size`. The platform injects BU values, network values, `environment`, the size's values and the BU's default region, but only into variables the pattern declares, and removes those from the caller's schema. `location` is limited to the BU's regions. Terraform runs with the environment's subscription; state stays in the platform subscription. Records carry BU, environment, subscription, size, injected values and requester in both stores. Other BUs get 404; changing a deployment needs the environment's deploy right; `PUT`/`retry` re-read the mapping but a deployment never moves subscription. New: `GET /me`, `GET /deployments`, filtered `GET /patterns`, caller-specific pattern page and schema. Subscription IDs are never returned. Off unless `FORGEAPI_TENANTS_PATH` is set.
+
+| Check | Result |
+| --- | --- |
+| `uv run pytest` / `ruff` | PASS: 86 / clean. 13 tenancy tests incl. a real Terraform run proving injected values and the target subscription reach Terraform; store contract for the new fields and scoped listing on SQLite **and** Table Storage (Azurite) |
+| Bugs the tests caught | subscription leaked as `null` in responses; one Terraform call ran without the target subscription; Table SDK filter parameter parsing |
+| Live, local, real `key-vault` v1.1.4 with a lab mapping (nothing deployed) | PASS: `/me` correct; pattern page hides `environment`, `business_unit`, `cost_center`, `sku_name`; dry run shows them injected with `location` = BU default |
+
+**Finding for the pattern repos:** key-vault's `config.yaml` sizes use `dev/staging/prod` but environments are `prototype/dev/tst/stg/prd`, so no size is offered in `stg`/`prd` until the keys match. Patterns also need to declare `private_endpoint_subnet_id` (etc.) to receive network values.
+
+**Not verified:** real group claims from Entra or Easy Auth (unit tests only); two real subscriptions; anything hosted. **Not built:** quotas, prd approvals, per-version limits, admin API/database for the mapping.

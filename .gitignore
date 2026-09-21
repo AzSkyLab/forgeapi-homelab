@@ -16,3 +16,4 @@ __pycache__/
 .ruff_cache/
 *.pem
 *.pfx
+/tenants.yaml

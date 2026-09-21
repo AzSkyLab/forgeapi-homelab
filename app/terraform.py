@@ -23,14 +23,15 @@ def log_path(deployment_id: str) -> Path:
     return deployment_dir(deployment_id) / "terraform.log"
 
 
-def _env() -> dict[str, str]:
+def _env(subscription_id: str | None = None) -> dict[str, str]:
     cache = settings.data_dir.resolve() / "plugin-cache"
     cache.mkdir(parents=True, exist_ok=True)
     env = {**catalog.git_env(), "TF_IN_AUTOMATION": "1", "TF_INPUT": "0"}
     env["TF_PLUGIN_CACHE_DIR"] = str(cache)
     identity = {
         "ARM_TENANT_ID": settings.azure_tenant_id,
-        "ARM_SUBSCRIPTION_ID": settings.azure_subscription_id,
+        # The business unit's subscription when placement applies, else the platform default.
+        "ARM_SUBSCRIPTION_ID": subscription_id or settings.azure_subscription_id,
         "ARM_CLIENT_ID": settings.azure_client_id,
     }
     env |= {k: v for k, v in identity.items() if v}
@@ -62,11 +63,15 @@ def _first_error(output: str) -> str:
     return " ".join(text.split())[:800]
 
 
-def _run(deployment_id: str, *args: str) -> str:
+def _run(deployment_id: str, *args: str, subscription_id: str | None = None) -> str:
     workdir = deployment_dir(deployment_id) / "work"
     result = subprocess.run(
         [settings.terraform_bin, *args],
-        cwd=workdir, env=_env(), capture_output=True, text=True, check=False,
+        cwd=workdir,
+        env=_env(subscription_id),
+        capture_output=True,
+        text=True,
+        check=False,
     )
     # `output -json` is returned to the caller, not logged: outputs live in the database.
     logged = result.stderr if args[0] == "output" else result.stdout + result.stderr
@@ -89,6 +94,9 @@ def _backend_args(deployment_id: str) -> list[str]:
         "key": f"deployments/{deployment_id}.tfstate",
         "use_azuread_auth": "true",
     }
+    if settings.azure_subscription_id:
+        # State lives in the platform subscription even when the deployment targets another.
+        config["subscription_id"] = settings.azure_subscription_id
     if settings.azure_federated_client_id:
         config["use_oidc"] = "true"
     elif settings.azure_use_managed_identity:
@@ -96,7 +104,9 @@ def _backend_args(deployment_id: str) -> list[str]:
     return [f"-backend-config={k}={v}" for k, v in config.items()]
 
 
-def prepare(deployment_id: str, source: str, variables: dict[str, Any]) -> None:
+def prepare(
+    deployment_id: str, source: str, variables: dict[str, Any], subscription_id: str | None = None
+) -> None:
     """Workspace with the pattern at its pinned commit, initialised against its state.
 
     A workspace already holding this source is reused (local-state patterns keep their state
@@ -109,24 +119,29 @@ def prepare(deployment_id: str, source: str, variables: dict[str, Any]) -> None:
             raise TerraformError("cannot change the version of a deployment that keeps local state")
         shutil.rmtree(workdir, ignore_errors=True)
         workdir.mkdir(parents=True)
-        _run(deployment_id, "init", "-no-color", "-backend=false", f"-from-module={source}")
+        fetch = ("init", "-no-color", "-backend=false", f"-from-module={source}")
+        _run(deployment_id, *fetch, subscription_id=subscription_id)
         marker.write_text(source)
     (workdir / "terraform.tfvars.json").write_text(json.dumps(variables))
     backend = _backend_args(deployment_id) if catalog.uses_azurerm_backend(workdir) else []
-    _run(deployment_id, "init", "-no-color", *backend)
+    _run(deployment_id, "init", "-no-color", *backend, subscription_id=subscription_id)
 
 
-def plan(deployment_id: str, source: str, variables: dict[str, Any]) -> None:
-    prepare(deployment_id, source, variables)
-    _run(deployment_id, "plan", "-no-color", "-out=tfplan")
+def plan(
+    deployment_id: str, source: str, variables: dict[str, Any], subscription_id: str | None = None
+) -> None:
+    prepare(deployment_id, source, variables, subscription_id)
+    _run(deployment_id, "plan", "-no-color", "-out=tfplan", subscription_id=subscription_id)
 
 
-def destroy(deployment_id: str, source: str, variables: dict[str, Any]) -> None:
-    prepare(deployment_id, source, variables)
-    _run(deployment_id, "destroy", "-no-color", "-auto-approve")
+def destroy(
+    deployment_id: str, source: str, variables: dict[str, Any], subscription_id: str | None = None
+) -> None:
+    prepare(deployment_id, source, variables, subscription_id)
+    _run(deployment_id, "destroy", "-no-color", "-auto-approve", subscription_id=subscription_id)
 
 
-def apply(deployment_id: str) -> dict[str, Any]:
-    _run(deployment_id, "apply", "-no-color", "tfplan")
-    raw = json.loads(_run(deployment_id, "output", "-json"))
+def apply(deployment_id: str, subscription_id: str | None = None) -> dict[str, Any]:
+    _run(deployment_id, "apply", "-no-color", "tfplan", subscription_id=subscription_id)
+    raw = json.loads(_run(deployment_id, "output", "-json", subscription_id=subscription_id))
     return {name: o["value"] for name, o in raw.items() if not o.get("sensitive")}

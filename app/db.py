@@ -11,6 +11,8 @@ from app import db_table
 from app.models import Deployment, State
 from app.settings import settings
 
+_PLACEMENT = ("business_unit", "environment", "subscription_id", "size", "requested_by")
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS deployments (
     id         TEXT PRIMARY KEY,
@@ -26,12 +28,17 @@ CREATE TABLE IF NOT EXISTS deployments (
 
 
 def create(
-    pattern: str, inputs: dict[str, Any], version: str | None = None, commit: str | None = None
+    pattern: str,
+    inputs: dict[str, Any],
+    version: str | None = None,
+    commit: str | None = None,
+    **placement: Any,
 ) -> Deployment:
+    """`placement`: business_unit, environment, subscription_id, size, injected, requested_by."""
     now = datetime.now(UTC)
     deployment = Deployment(
         id=f"dep_{uuid.uuid4().hex}", pattern=pattern, version=version, commit=commit,
-        inputs=inputs, state=State.accepted, created_at=now, updated_at=now,
+        inputs=inputs, state=State.accepted, created_at=now, updated_at=now, **placement,
     )  # fmt: skip
     _store().insert(deployment)
     return deployment
@@ -52,9 +59,21 @@ def update(
     _store().update(deployment_id, state, outputs, error, datetime.now(UTC))
 
 
-def respec(deployment_id: str, inputs: dict[str, Any], version: str | None, commit: str | None):
+def respec(
+    deployment_id: str,
+    inputs: dict[str, Any],
+    version: str | None,
+    commit: str | None,
+    size: str | None = None,
+    injected: dict[str, Any] | None = None,
+):
     """Change what the deployment should be; the next run applies it against the same state."""
-    _store().respec(deployment_id, inputs, version, commit, datetime.now(UTC))
+    _store().respec(deployment_id, inputs, version, commit, size, injected, datetime.now(UTC))
+
+
+def list_for(business_units: list[str] | None) -> list[Deployment]:
+    """Newest first. `None` means no business-unit filter (single-tenant mode)."""
+    return _store().list_for(business_units)
 
 
 def _store():
@@ -71,7 +90,7 @@ class _Sqlite:
         conn.row_factory = sqlite3.Row
         conn.execute(_SCHEMA)
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(deployments)")}
-        for column in ("version", "commit_sha"):
+        for column in ("version", "commit_sha", *_PLACEMENT, "injected"):
             if column not in columns:
                 conn.execute(f"ALTER TABLE deployments ADD COLUMN {column} TEXT")
         return conn
@@ -80,11 +99,13 @@ class _Sqlite:
     def insert(cls, d: Deployment) -> None:
         with cls._connect() as conn:
             conn.execute(
-                "INSERT INTO deployments "
-                "(id, pattern, version, commit_sha, inputs, state, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO deployments (id, pattern, version, commit_sha, inputs, state, "
+                "created_at, updated_at, business_unit, environment, subscription_id, size, "
+                "requested_by, injected) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (d.id, d.pattern, d.version, d.commit, json.dumps(d.inputs), d.state,
-                 d.created_at.isoformat(), d.updated_at.isoformat()),
+                 d.created_at.isoformat(), d.updated_at.isoformat(),
+                 *(getattr(d, name) for name in _PLACEMENT),
+                 json.dumps(d.injected) if d.injected is not None else None),
             )  # fmt: skip
 
     @classmethod
@@ -93,22 +114,37 @@ class _Sqlite:
             row = conn.execute(
                 "SELECT * FROM deployments WHERE id = ?", (deployment_id,)
             ).fetchone()
-        if row is None:
-            return None
+        return cls._to_deployment(row) if row else None
+
+    @staticmethod
+    def _to_deployment(row: sqlite3.Row) -> Deployment:
         fields = dict(row)
         fields["commit"] = fields.pop("commit_sha")
         fields["inputs"] = json.loads(fields["inputs"])
-        fields["outputs"] = json.loads(fields["outputs"]) if fields["outputs"] else None
+        for name in ("outputs", "injected"):
+            fields[name] = json.loads(fields[name]) if fields[name] else None
         return Deployment(**fields)
 
     @classmethod
-    def respec(cls, deployment_id, inputs, version, commit, now) -> None:
+    def list_for(cls, business_units: list[str] | None) -> list[Deployment]:
+        query, args = "SELECT * FROM deployments", []
+        if business_units is not None:
+            marks = ",".join("?" * len(business_units)) or "NULL"
+            query, args = f"{query} WHERE business_unit IN ({marks})", list(business_units)
+        with cls._connect() as conn:
+            rows = conn.execute(f"{query} ORDER BY created_at DESC", args).fetchall()
+        return [cls._to_deployment(row) for row in rows]
+
+    @classmethod
+    def respec(cls, deployment_id, inputs, version, commit, size, injected, now) -> None:
         with cls._connect() as conn:
             conn.execute(
-                "UPDATE deployments SET inputs = ?, version = ?, commit_sha = ?, updated_at = ? "
-                "WHERE id = ?",
-                (json.dumps(inputs), version, commit, now.isoformat(), deployment_id),
-            )
+                "UPDATE deployments SET inputs = ?, version = ?, commit_sha = ?, size = ?, "
+                "injected = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(inputs), version, commit, size,
+                 json.dumps(injected) if injected is not None else None,
+                 now.isoformat(), deployment_id),
+            )  # fmt: skip
 
     @classmethod
     def update(cls, deployment_id, state, outputs, error, now) -> None:

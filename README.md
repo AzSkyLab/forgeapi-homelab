@@ -74,6 +74,16 @@ Inputs are checked at the API (422, all problems at once, never echoing the subm
 
 **Private repos:** natively git uses your own credential helper. For Docker: `FORGEAPI_GITHUB_TOKEN=$(gh auth token) docker compose up --build -d`.
 
+## Business units: where things go and who may deploy
+
+Optional (`FORGEAPI_TENANTS_PATH`). Callers say what they want; the platform decides where. A mapping ([tenants.example.yaml](tenants.example.yaml)) ties Entra groups to business units, and each business unit + environment to a subscription. It also supplies inputs callers must not set (business unit, cost centre, subnets), limits patterns and regions, and restricts who may deploy to which environment. T-shirt sizes come from the pattern's own `config.yaml` and lock the inputs they set. Deployments belong to their business unit; others cannot see them. Callers never see a subscription ID. Design and rules: [docs/tenancy.md](docs/tenancy.md).
+
+```sh
+curl -s localhost:8000/me                       # my business units, environments, patterns
+curl -s -XPOST localhost:8000/deployments -H 'content-type: application/json' \
+  -d '{"pattern":"key-vault","environment":"dev","size":"small","inputs":{"name":"kv1", ...}}'
+```
+
 ## Hosting
 
 **Deploying at work (existing ACA environment, MCP server, no local dev):** follow [docs/work-deployment.md](docs/work-deployment.md).
@@ -90,6 +100,8 @@ Default `FORGEAPI_AUTH_MODE=none` is for loopback development. `entra` validates
 app/main.py        routes + Temporal dispatch      app/workflows.py   DeployWorkflow (no I/O)
 app/catalog.py     git-tag catalog, reads variables
 app/schema.py      rules -> JSON Schema, examples  app/activities.py  plan / apply / mark_failed
+app/tenants.py     business-unit mapping
+app/placement.py   injected inputs, sizes
 app/db.py          records: SQLite or Table         app/terraform.py   CLI subprocess wrapper
-app/auth.py        optional Entra validation       app/worker.py, app/devserver.py
+app/auth.py        who is calling + groups         app/worker.py, app/devserver.py
 ```
