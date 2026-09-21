@@ -61,6 +61,7 @@ patterns:
 | `POST /deployments?dry_run=true` | checks a request and creates nothing |
 | `POST /deployments/{id}/retry` | re-runs a failed deployment against the same commit, inputs and state; Terraform finishes what is missing |
 | `PUT /deployments/{id}` | change inputs and/or pattern version and apply the difference against the existing state (`inputs` replaces the whole set; omit to keep) |
+| outputs on `GET /deployments/{id}` | non-sensitive outputs, `secret_references` (Key Vault secret IDs found in them) and `withheld_outputs` (names only); secrets stay in the pattern's vault ([docs/outputs.md](docs/outputs.md)) |
 | `GET /deployments/{id}/events`, `GET /events` | audit trail: every accepted action, refusal, denied access and final outcome ([docs/audit.md](docs/audit.md)) |
 | `DELETE /deployments/{id}` | `terraform destroy` from the deployment's state; the record is kept as `destroyed` |
 | `POST /deployments {"pattern","version","inputs"}` | `version` optional (latest tag). The tag is resolved to a commit at acceptance; that commit is what runs, even if the tag later moves |

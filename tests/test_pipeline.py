@@ -291,9 +291,50 @@ def test_concurrent_first_time_deployments_share_a_cold_provider_cache():
 
     def run(deployment):
         terraform.plan(deployment.id, source, deployment.inputs)
-        return terraform.apply(deployment.id, source, deployment.inputs)
+        return terraform.apply(deployment.id, source, deployment.inputs)[0]
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         outputs = list(pool.map(run, deployments))
 
     assert [Path(o["path"]).read_text() for o in outputs] == ["0", "1", "2", "3"]
+
+
+def test_sensitive_outputs_are_withheld_by_name_and_references_are_surfaced(pattern_repo):
+    """A pattern keeps its secret in its own vault and outputs a reference. The API never stores
+    or returns the sensitive value, but says which outputs it withheld."""
+    from app.models import DeploymentOut
+
+    main = pattern_repo / "main.tf"
+    main.write_text(
+        main.read_text()
+        + """
+output "admin_password" {
+  value     = "hunter2-very-secret"
+  sensitive = true
+}
+output "database_url_secret" {
+  value = "https://kv-demo-x1.vault.azure.net/secrets/database-url"
+}
+output "secrets" {
+  value = { pg_admin = "https://kv-demo-x1.vault.azure.net/secrets/pg-admin/0123abcd" }
+}
+output "host" { value = "db.example.internal" }
+"""
+    )
+    git(pattern_repo, "commit", "-qam", "outputs"), git(pattern_repo, "tag", "v1.4.0")
+    deployment = _accept("demo", {"filename": "o.txt", "content": "x"})
+
+    assert asyncio.run(_run_workflow(deployment.id)) == "succeeded"
+
+    result = db.get(deployment.id)
+    assert result.withheld_outputs == ["admin_password"]
+    assert (
+        "admin_password" not in result.outputs and result.outputs["host"] == "db.example.internal"
+    )
+    shown = DeploymentOut.of(result)
+    assert shown.secret_references == {
+        "database_url_secret": "https://kv-demo-x1.vault.azure.net/secrets/database-url",
+        "secrets.pg_admin": "https://kv-demo-x1.vault.azure.net/secrets/pg-admin/0123abcd",
+    }
+    everything = shown.model_dump_json() + terraform.log_path(deployment.id).read_text()
+    assert "hunter2" not in everything  # not in the record, the response or the log

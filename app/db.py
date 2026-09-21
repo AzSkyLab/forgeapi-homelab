@@ -55,9 +55,10 @@ def update(
     *,
     outputs: dict[str, Any] | None = None,
     error: str | None = None,
+    withheld: list[str] | None = None,
 ) -> None:
-    """Set state and error; `outputs` is kept unless a new value is given."""
-    _store().update(deployment_id, state, outputs, error, datetime.now(UTC))
+    """Set state and error; `outputs` (with `withheld`) is kept unless a new value is given."""
+    _store().update(deployment_id, state, outputs, error, withheld, datetime.now(UTC))
 
 
 def respec(
@@ -93,7 +94,7 @@ class _Sqlite:
         conn.row_factory = sqlite3.Row
         conn.execute(_SCHEMA)
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(deployments)")}
-        for column in ("version", "commit_sha", *_PLACEMENT, "injected"):
+        for column in ("version", "commit_sha", *_PLACEMENT, "injected", "withheld_outputs"):
             if column not in columns:
                 conn.execute(f"ALTER TABLE deployments ADD COLUMN {column} TEXT")
         for column in ("estimated_monthly_cost",):
@@ -129,7 +130,7 @@ class _Sqlite:
         fields = dict(row)
         fields["commit"] = fields.pop("commit_sha")
         fields["inputs"] = json.loads(fields["inputs"])
-        for name in ("outputs", "injected"):
+        for name in ("outputs", "injected", "withheld_outputs"):
             fields[name] = json.loads(fields[name]) if fields[name] else None
         return Deployment(**fields)
 
@@ -155,11 +156,13 @@ class _Sqlite:
             )  # fmt: skip
 
     @classmethod
-    def update(cls, deployment_id, state, outputs, error, now) -> None:
+    def update(cls, deployment_id, state, outputs, error, withheld, now) -> None:
         with cls._connect() as conn:
             conn.execute(
-                "UPDATE deployments SET state = ?, outputs = COALESCE(?, outputs), error = ?, "
+                "UPDATE deployments SET state = ?, outputs = COALESCE(?, outputs), "
+                "withheld_outputs = COALESCE(?, withheld_outputs), error = ?, "
                 "updated_at = ? WHERE id = ?",
-                (state, json.dumps(outputs) if outputs is not None else None, error,
+                (state, json.dumps(outputs) if outputs is not None else None,
+                 json.dumps(withheld) if outputs is not None else None, error,
                  now.isoformat(), deployment_id),
             )  # fmt: skip

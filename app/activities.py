@@ -38,10 +38,10 @@ def plan(deployment_id: str) -> None:
 def apply(deployment_id: str) -> None:
     deployment = db.get(deployment_id)
     db.update(deployment_id, State.applying)
-    outputs = terraform.apply(
+    outputs, withheld = terraform.apply(
         deployment_id, _source(deployment), _variables(deployment), deployment.subscription_id
     )
-    db.update(deployment_id, State.succeeded, outputs=outputs)
+    db.update(deployment_id, State.succeeded, outputs=outputs, withheld=withheld)
     _outcome(deployment, "succeeded")
 
 

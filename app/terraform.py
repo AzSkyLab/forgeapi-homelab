@@ -194,8 +194,8 @@ def destroy(
 
 def apply(
     deployment_id: str, source: str, variables: dict[str, Any], subscription_id: str | None = None
-) -> dict[str, Any]:
-    """Apply the saved plan for exactly this request.
+) -> tuple[dict[str, Any], list[str]]:
+    """Apply the saved plan for exactly this request. Returns (outputs, withheld output names).
 
     Plan and apply are separate steps and may run on different worker replicas, each with its
     own disk. If this replica does not hold a plan made from this source, these variables and
@@ -212,4 +212,14 @@ def apply(
     saved.unlink(missing_ok=True)  # a plan is applied once
     stamp.unlink(missing_ok=True)
     raw = json.loads(_run(deployment_id, "output", "-json", subscription_id=subscription_id))
-    return {name: o["value"] for name, o in raw.items() if not o.get("sensitive")}
+    return split_outputs(raw)
+
+
+def split_outputs(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """(values safe to store and return, names of sensitive outputs that were withheld).
+
+    A sensitive value is never stored or returned by the API. Its *name* is, so that a pattern
+    which marks something sensitive without putting it in a Key Vault is visible rather than
+    silently lossy."""
+    shown = {name: o["value"] for name, o in raw.items() if not o.get("sensitive")}
+    return shown, sorted(name for name, o in raw.items() if o.get("sensitive"))
