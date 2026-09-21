@@ -318,3 +318,17 @@ Engineer requirement: end users must not know where resources go; the platform m
 **Not verified:** two genuinely different subscriptions; Easy Auth's header in a real Easy Auth deployment; group overage handling against a real over-limit user; a caller in two BUs with real tokens (unit-tested).
 
 **Left in the lab:** the three `forgeapi-lab-*` Entra groups and the group-claims setting on the API app registration (needed for further demos).
+
+## 2026-09-20 — Merged to main; budgets (branch `quotas-budgets`)
+
+**Housekeeping:** PR #1 merged `tenancy` (which contained `aca-hosting` and `fastapi-rewrite`) into `main`. `main` had one Go-era docs commit from another machine (`dc1ffdd`, Windows WSL handover); it is merged, with its progress notes applied to `docs/archive-go/progress.md`. Go implementation preserved at tag `go-archive`. The three merged branches were deleted after a containment check.
+
+**Budgets (engineer decisions in [tenancy.md](tenancy.md#budgets)):** `app/budgets.py`; `budget_monthly` per BU/environment; cost from the pattern's `estimated_costs` at the pinned commit, stored on the record; committed = everything not `destroyed` (failed counts); over-budget requests refused 403 with numbers; dry run reports impact; `PUT`/`retry` do not double count; unpriced patterns refused where a budget exists; examples declare cost 0. Visible in `/me`, the pattern page and dry runs.
+
+| Check | Result |
+| --- | --- |
+| `uv run pytest` / `ruff` | PASS: 92 / clean. Budget tests: refusal with exact figures, dry-run refusal and report, failed still counts, destroy frees, no double count on update/retry, unpriced pattern refused only where budgeted, budgets separate per BU and environment; cost field (including a real zero) round-trips on SQLite and Table Storage |
+
+**Not verified:** budgets on the hosted copy or against the real key-vault pattern's `estimated_costs` (unit-level only so far). **Known limits:** estimates are not bills; concurrent requests can overshoot; no counts, per-pattern caps, expiry or actual-spend reporting.
+
+**Also explained to the engineer, not built:** the single-worker-replica limit (plan and apply are separate activities sharing a local workspace). Recommended fix: make apply re-create its workspace and re-plan (small), and store the saved plan in blob storage once approvals exist.

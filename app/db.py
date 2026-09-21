@@ -34,7 +34,8 @@ def create(
     commit: str | None = None,
     **placement: Any,
 ) -> Deployment:
-    """`placement`: business_unit, environment, subscription_id, size, injected, requested_by."""
+    """`placement`: business_unit, environment, subscription_id, size, injected, requested_by,
+    estimated_monthly_cost."""
     now = datetime.now(UTC)
     deployment = Deployment(
         id=f"dep_{uuid.uuid4().hex}", pattern=pattern, version=version, commit=commit,
@@ -66,9 +67,11 @@ def respec(
     commit: str | None,
     size: str | None = None,
     injected: dict[str, Any] | None = None,
+    cost: float | None = None,
 ):
     """Change what the deployment should be; the next run applies it against the same state."""
-    _store().respec(deployment_id, inputs, version, commit, size, injected, datetime.now(UTC))
+    now = datetime.now(UTC)
+    _store().respec(deployment_id, inputs, version, commit, size, injected, cost, now)
 
 
 def list_for(business_units: list[str] | None) -> list[Deployment]:
@@ -93,6 +96,9 @@ class _Sqlite:
         for column in ("version", "commit_sha", *_PLACEMENT, "injected"):
             if column not in columns:
                 conn.execute(f"ALTER TABLE deployments ADD COLUMN {column} TEXT")
+        for column in ("estimated_monthly_cost",):
+            if column not in columns:
+                conn.execute(f"ALTER TABLE deployments ADD COLUMN {column} REAL")
         return conn
 
     @classmethod
@@ -101,11 +107,13 @@ class _Sqlite:
             conn.execute(
                 "INSERT INTO deployments (id, pattern, version, commit_sha, inputs, state, "
                 "created_at, updated_at, business_unit, environment, subscription_id, size, "
-                "requested_by, injected) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "requested_by, injected, estimated_monthly_cost) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (d.id, d.pattern, d.version, d.commit, json.dumps(d.inputs), d.state,
                  d.created_at.isoformat(), d.updated_at.isoformat(),
                  *(getattr(d, name) for name in _PLACEMENT),
-                 json.dumps(d.injected) if d.injected is not None else None),
+                 json.dumps(d.injected) if d.injected is not None else None,
+                 d.estimated_monthly_cost),
             )  # fmt: skip
 
     @classmethod
@@ -136,13 +144,13 @@ class _Sqlite:
         return [cls._to_deployment(row) for row in rows]
 
     @classmethod
-    def respec(cls, deployment_id, inputs, version, commit, size, injected, now) -> None:
+    def respec(cls, deployment_id, inputs, version, commit, size, injected, cost, now) -> None:
         with cls._connect() as conn:
             conn.execute(
                 "UPDATE deployments SET inputs = ?, version = ?, commit_sha = ?, size = ?, "
-                "injected = ?, updated_at = ? WHERE id = ?",
+                "injected = ?, estimated_monthly_cost = ?, updated_at = ? WHERE id = ?",
                 (json.dumps(inputs), version, commit, size,
-                 json.dumps(injected) if injected is not None else None,
+                 json.dumps(injected) if injected is not None else None, cost,
                  now.isoformat(), deployment_id),
             )  # fmt: skip
 

@@ -43,6 +43,7 @@ class Deployment(BaseModel):
     subscription_id: str | None = None
     size: str | None = None
     injected: dict[str, Any] | None = None  # values the platform supplied to the pattern
+    estimated_monthly_cost: float | None = None  # the pattern's own estimate, at acceptance
     requested_by: str | None = None
     state: State
     outputs: dict[str, Any] | None = None

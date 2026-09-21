@@ -46,10 +46,23 @@ business_units:
 7. **Ownership.** The record stores BU, environment, subscription, size, injected values and who asked. Reading a deployment needs membership of its BU; update, retry and destroy also need the environment's deploy right. Others get 404, not 403, so IDs do not leak across BUs.
 8. **Re-evaluation.** `PUT` and `retry` recompute placement and injection from the current mapping, so a corrected subnet or cost centre is picked up. The subscription of an existing deployment never changes; if the mapping now points elsewhere the request is refused.
 
+## Budgets
+
+Decisions (engineer, 2026-09-20): limit the **estimated monthly cost**, per **business unit and environment**; measure against the **pattern's own estimates** now, real Azure spend later; **refuse** what does not fit, with a clear message.
+
+- `environments.<env>.budget_monthly` in the mapping. Absent = unlimited. Currency is whatever the pattern authors use; the platform only compares numbers.
+- A deployment's cost is read from the pattern's `config.yaml` at the pinned commit: `estimated_costs.<size>.<environment>`, else `estimated_costs.<environment>`, else a single number. It is stored on the record when the request is accepted, so later edits to the pattern do not silently change what is committed.
+- **Committed** = the sum for every deployment in that BU/environment that is not `destroyed`. In-flight and **failed** deployments count: a failed deployment may hold resources, and destroying it is what frees the budget.
+- A request that would push committed above the budget is refused (403) with the budget, what is committed, what this request adds and what is available. Dry run gives the same answer without creating anything. `PUT` and `retry` do not count the deployment's own current cost twice; a `PUT` to a larger size must fit the difference.
+- Where a budget is set, a pattern that declares **no** estimate is refused: treating unknown as free would let exactly the unpriced patterns bypass the budget. Declare `estimated_costs: 0` for genuinely free patterns (the two built-in examples do).
+- Callers see their position in `GET /me` (`budgets`), on the pattern page (`estimated_monthly_cost` per size, `budget`) and in dry runs.
+
+Limits: estimates are not bills; two simultaneous requests can both pass the check and overshoot slightly (no cross-request lock); no BU-wide total, counts, per-pattern caps or expiry yet; actual spend from Cost Management (by the injected `BusinessUnit` tag) is not built.
+
 ## Discovery
 
 `GET /me` → the caller's BUs, the environments they can deploy to, regions and patterns. `GET /patterns` is filtered to what the caller can use. `GET /patterns/{name}?business_unit=&environment=` shows the schema as that caller will see it: platform-supplied inputs removed, `location` limited to allowed regions, available sizes listed. `GET /deployments` lists the caller's BUs' deployments.
 
 ## Not in scope yet
 
-Per-pattern version limits per BU; quotas/budgets; approval steps for prd; an admin API for the mapping; audit log beyond the deployment record.
+Per-pattern version limits per BU; deployment counts, per-pattern caps and expiry; actual-spend reporting; approval steps for prd; an admin API for the mapping; audit log beyond the deployment record.

@@ -40,6 +40,10 @@ def _table() -> TableClient:
     return client
 
 
+def _number(value: float | None) -> float | str:
+    return "" if value is None else float(value)  # "" because a merge cannot store null
+
+
 def insert(d: Deployment) -> None:
     with _table() as table:
         table.create_entity(
@@ -55,6 +59,7 @@ def insert(d: Deployment) -> None:
                 "error": "",
                 **{name: getattr(d, name) or "" for name in _PLACEMENT},
                 "injected": json.dumps(d.injected) if d.injected is not None else "",
+                "estimated_monthly_cost": _number(d.estimated_monthly_cost),
                 "created_at": d.created_at.isoformat(),
                 "updated_at": d.updated_at.isoformat(),
             }
@@ -98,6 +103,9 @@ def _to_deployment(e) -> Deployment:
         updated_at=e["updated_at"],
         **{name: e.get(name) or None for name in _PLACEMENT},
         injected=json.loads(e["injected"]) if e.get("injected") else None,
+        estimated_monthly_cost=None
+        if e.get("estimated_monthly_cost") in (None, "")
+        else float(e["estimated_monthly_cost"]),
     )
 
 
@@ -129,9 +137,11 @@ def respec(
     commit: str | None,
     size: str | None,
     injected: dict[str, Any] | None,
+    cost: float | None,
     now: datetime,
 ) -> None:
     changes = {
+        "estimated_monthly_cost": _number(cost),
         "PartitionKey": _PARTITION,
         "RowKey": deployment_id,
         "inputs": json.dumps(inputs),

@@ -68,6 +68,7 @@ SIZING = {
         "small": {"dev": {"tier": "s-dev"}, "prd": {"tier": "s-prd"}},
         "large": {"prd": {"tier": "l-prd", "not_a_variable": True}},
     },
+    "estimated_costs": {"small": {"dev": 40, "prd": 400}, "large": {"prd": 1000}},
 }
 
 
@@ -97,6 +98,7 @@ def tenancy(tmp_path, monkeypatch):
                         "environments": {
                             "dev": {
                                 "subscription_id": SUB_FIN_DEV,
+                                "budget_monthly": 100,
                                 "network": {"private_endpoint_subnet_id": "/fin/dev/snet-pe"},
                             },
                             "prd": {
@@ -171,6 +173,8 @@ def test_pattern_page_hides_platform_inputs_and_limits_location(client):
         "environment": "dev",
         "environments": ["dev"],
         "sizes": {"dev": ["small"]},
+        "estimated_monthly_cost": {"small": 40.0},
+        "budget": {"monthly_budget": 100, "committed": 0, "available": 100.0},
     }
     assert page["example"]["environment"] == "dev" and page["example"]["size"] == "small"
     schema = client.get("/patterns/sized/schema").json()
@@ -347,3 +351,79 @@ def test_mapping_can_be_supplied_as_text_instead_of_a_file(client, monkeypatch):
 
     monkeypatch.setattr(settings, "tenants_yaml", text)
     assert [u["name"] for u in client.get("/me").json()["business_units"]] == ["finance"]
+
+
+def test_budget_refuses_what_does_not_fit_and_destroying_frees_it(client, dispatched):
+    first, _second = deploy(client).json(), deploy(client).json()
+    assert first["estimated_monthly_cost"] == 40.0
+    assert client.get("/me").json()["business_units"][0]["budgets"]["dev"] == {
+        "monthly_budget": 100, "committed": 80.0, "available": 20.0,
+    }  # fmt: skip
+
+    third = deploy(client)
+    assert third.status_code == 403
+    assert third.json()["detail"] | {"hint": ""} == {
+        "message": "this would exceed the estimated monthly budget for finance/dev",
+        "monthly_budget": 100, "committed": 80.0, "this_request": 40.0, "available": 20.0,
+        "hint": "",
+    }  # fmt: skip
+    assert deploy(client, **{}).status_code == 403
+    assert (
+        client.post(
+            "/deployments?dry_run=true",
+            json={
+                "pattern": "sized",
+                "environment": "dev",
+                "size": "small",
+                "inputs": {"name": "x"},
+            },
+        ).status_code
+        == 403
+    )  # dry run tells you before you try
+    assert len(dispatched) == 2
+
+    db.update(first["id"], State.failed, error="boom")  # failed still counts: may hold resources
+    assert deploy(client).status_code == 403
+    db.update(first["id"], State.destroyed)
+    assert deploy(client).status_code == 202
+
+
+def test_dry_run_reports_the_budget_impact(client):
+    report = client.post(
+        "/deployments?dry_run=true",
+        json={"pattern": "sized", "environment": "dev", "size": "small", "inputs": {"name": "x"}},
+    ).json()
+    assert report["estimated_monthly_cost"] == 40.0
+    assert report["budget"] == {
+        "monthly_budget": 100, "committed": 0, "this_request": 40.0, "available": 100.0,
+    }  # fmt: skip
+
+
+def test_update_and_retry_do_not_count_a_deployment_twice(client):
+    one, two = deploy(client).json()["id"], deploy(client).json()["id"]  # 80 of 100 committed
+    for deployment_id in (one, two):
+        db.update(deployment_id, State.succeeded, outputs={})
+    assert client.put(f"/deployments/{one}", json={}).status_code == 202
+    db.update(two, State.failed, error="boom")
+    assert client.post(f"/deployments/{two}/retry").status_code == 202
+
+
+def test_pattern_without_an_estimate_is_refused_only_where_a_budget_exists(client, monkeypatch):
+    request = {"pattern": "demo", "environment": "dev", "inputs": {"filename": "a", "content": "b"}}
+    refused = client.post("/deployments", json=request)
+    assert refused.status_code == 403 and "declares no estimated cost" in refused.json()["detail"]
+
+    spec = yaml.safe_load(settings.tenants_path.read_text())
+    del spec["business_units"]["finance"]["environments"]["dev"]["budget_monthly"]
+    settings.tenants_path.write_text(yaml.safe_dump(spec))
+    accepted = client.post("/deployments", json=request)
+    assert accepted.status_code == 202 and accepted.json()["estimated_monthly_cost"] is None
+
+
+def test_budgets_are_separate_per_business_unit_and_environment(client, monkeypatch):
+    deploy(client), deploy(client)  # finance/dev is now nearly full
+    as_groups(monkeypatch, HR_DEVS)
+    assert deploy(client).status_code == 202  # hr/dev has no budget and its own count
+    as_groups(monkeypatch, FIN_DEVS, FIN_RELEASE)
+    prd = deploy(client, environment="prd", size="large")
+    assert prd.status_code == 202 and prd.json()["estimated_monthly_cost"] == 1000.0

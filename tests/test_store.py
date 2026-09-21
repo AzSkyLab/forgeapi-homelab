@@ -110,7 +110,11 @@ def test_placement_fields_round_trip_and_listing_is_scoped(store):
     fin = db.create(
         "demo", {"n": 1}, "v1", "abc", business_unit="finance", environment="dev",
         subscription_id="sub-1", size="small", injected=injected, requested_by="user-1",
+        estimated_monthly_cost=12.5,
     )  # fmt: skip
+    free = db.create("demo", {}, business_unit="finance", estimated_monthly_cost=0)
+    assert db.get(free.id).estimated_monthly_cost == 0  # zero is a real estimate, not "unknown"
+    assert db.get(fin.id).estimated_monthly_cost == 12.5
     hr = db.create("demo", {}, business_unit="hr's", environment="dev", subscription_id="sub-2")
     legacy = db.create("demo", {})
 
@@ -123,12 +127,12 @@ def test_placement_fields_round_trip_and_listing_is_scoped(store):
     assert loaded.requested_by == "user-1"
     assert db.get(legacy.id).business_unit is None and db.get(legacy.id).injected is None
 
-    assert [d.id for d in db.list_for(["finance"])] == [fin.id]
-    assert {d.id for d in db.list_for(["finance", "hr's"])} == {fin.id, hr.id}  # quote-safe
+    assert {d.id for d in db.list_for(["finance"])} == {fin.id, free.id}
+    assert {d.id for d in db.list_for(["finance", "hr's"])} == {fin.id, free.id, hr.id}  # quotes
     assert db.list_for([]) == []
     assert {fin.id, hr.id, legacy.id} <= {d.id for d in db.list_for(None)}
 
-    db.respec(fin.id, {"n": 2}, "v2", "def", "large", {"cost_center": "CC-2"})
+    db.respec(fin.id, {"n": 2}, "v2", "def", "large", {"cost_center": "CC-2"}, 99)
     changed = db.get(fin.id)
     assert (changed.size, changed.injected, changed.version) == (
         "large",
@@ -136,3 +140,4 @@ def test_placement_fields_round_trip_and_listing_is_scoped(store):
         "v2",
     )
     assert changed.business_unit == "finance" and changed.subscription_id == "sub-1"
+    assert changed.estimated_monthly_cost == 99
