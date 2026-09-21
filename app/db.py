@@ -75,6 +75,11 @@ def respec(
     _store().respec(deployment_id, inputs, version, commit, size, injected, cost, now)
 
 
+def touch(deployment_id: str) -> None:
+    """Heartbeat: this deployment's job is still alive (only moves `updated_at`)."""
+    _store().touch(deployment_id, datetime.now(UTC))
+
+
 def list_for(business_units: list[str] | None) -> list[Deployment]:
     """Newest first. `None` means no business-unit filter (single-tenant mode)."""
     return _store().list_for(business_units)
@@ -143,6 +148,14 @@ class _Sqlite:
         with cls._connect() as conn:
             rows = conn.execute(f"{query} ORDER BY created_at DESC", args).fetchall()
         return [cls._to_deployment(row) for row in rows]
+
+    @classmethod
+    def touch(cls, deployment_id, now) -> None:
+        with cls._connect() as conn:
+            conn.execute(
+                "UPDATE deployments SET updated_at = ? WHERE id = ?",
+                (now.isoformat(), deployment_id),
+            )
 
     @classmethod
     def respec(cls, deployment_id, inputs, version, commit, size, injected, cost, now) -> None:

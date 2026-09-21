@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     tenants_yaml: str | None = None
     dev_groups: str = ""  # comma-separated group IDs the caller has when auth_mode is "none"
 
+    # A deployment that claims to be running but has not moved for this long is treated as
+    # interrupted (its worker was stopped) and marked failed so it can be retried.
+    stale_after_seconds: int = 300
+
     # Where deployment records live. "table" is Azure Table Storage, for hosting.
     db_backend: Literal["sqlite", "table"] = "sqlite"
     table_storage_account: str | None = None
