@@ -193,3 +193,15 @@ def test_audit_events_round_trip_and_are_scoped(store):
     ]
     assert audit.for_deployment("dep_a", "hr's") == []
     assert audit.query(None, datetime.now(UTC) + timedelta(minutes=1), 10) == []
+
+
+def test_touch_moves_only_the_heartbeat(store):
+    deployment = db.create("demo", {"n": 1}, "v1", "abc")
+    db.update(deployment.id, State.applying)
+    before = db.get(deployment.id)
+    db.touch(deployment.id)
+    after = db.get(deployment.id)
+    assert after.updated_at > before.updated_at
+    assert after.model_dump(exclude={"updated_at"}) == before.model_dump(exclude={"updated_at"})
+    db.touch("dep_missing")  # no error, nothing created
+    assert db.get("dep_missing") is None

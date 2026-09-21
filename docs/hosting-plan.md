@@ -41,6 +41,10 @@ One small key-value table, read by ID. The cheapest Postgres Flexible Server is 
 
 Work's Temporal on AKS (persistence, auth, namespaces), private networking/VNet-integrated environment, multi-replica workers, the approved registry and gateway.
 
+## One container (the work shape)
+
+The work environment's MCP server deploys one image as one HTTP app with Easy Auth and a system-assigned identity, so the three-app layout above cannot be used there. `python -m app.allinone` (the image default) runs Temporal, the worker and the API in one container; records, state, logs and audit events are already external, so replicas are disposable. The lab keeps the three-app pattern for scale-to-zero cost control. Deployment at work: [work-deployment.md](work-deployment.md).
+
 ## Direct managed identity (added after the federation work)
 
 Federation needs an app registration and a federated credential, which may be hard to obtain at work. `app/msi_shim.py` removes that need: the worker serves the VM metadata token protocol on loopback, backed by the Azure SDK, and Terraform is pointed at it with `ARM_MSI_ENDPOINT`. An attached user-assigned identity is then used directly with its own role assignments. Verified with real Terraform locally and inside Container Apps. Federation still works and wins when `FORGEAPI_AZURE_FEDERATED_CLIENT_ID` is set. The work brief ([work-deployment.md](work-deployment.md)) uses the direct mode.

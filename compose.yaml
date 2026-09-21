@@ -10,6 +10,7 @@ x-app: &app
   #   FORGEAPI_GITHUB_TOKEN=$(gh auth token) docker compose up --build -d
   environment: &env
     FORGEAPI_GITHUB_TOKEN: ${FORGEAPI_GITHUB_TOKEN:-}
+    FORGEAPI_TEMPORAL_ADDRESS: temporal:7233  # the separate Temporal service below
   # Deployment workspaces, Terraform state, logs and the SQLite database. Same directory the
   # native (non-Docker) run uses, so state survives either way.
   volumes: &data

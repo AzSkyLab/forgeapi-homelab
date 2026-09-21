@@ -158,3 +158,9 @@ def respec(
     }
     with _table() as table, contextlib.suppress(ResourceNotFoundError):
         table.update_entity(changes, mode=UpdateMode.MERGE)
+
+
+def touch(deployment_id: str, now: datetime) -> None:
+    changes = {"PartitionKey": _PARTITION, "RowKey": deployment_id, "updated_at": now.isoformat()}
+    with _table() as table, contextlib.suppress(ResourceNotFoundError):
+        table.update_entity(changes, mode=UpdateMode.MERGE)

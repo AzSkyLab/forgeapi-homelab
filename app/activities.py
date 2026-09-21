@@ -2,7 +2,7 @@
 
 from temporalio import activity
 
-from app import audit, catalog, db, terraform
+from app import audit, catalog, db, recovery, terraform
 from app.models import State
 
 
@@ -29,18 +29,20 @@ def _variables(deployment) -> dict:
 def plan(deployment_id: str) -> None:
     deployment = db.get(deployment_id)
     db.update(deployment_id, State.planning)
-    terraform.plan(
-        deployment_id, _source(deployment), _variables(deployment), deployment.subscription_id
-    )
+    with recovery.alive(deployment_id):
+        terraform.plan(
+            deployment_id, _source(deployment), _variables(deployment), deployment.subscription_id
+        )
 
 
 @activity.defn
 def apply(deployment_id: str) -> None:
     deployment = db.get(deployment_id)
     db.update(deployment_id, State.applying)
-    outputs, withheld = terraform.apply(
-        deployment_id, _source(deployment), _variables(deployment), deployment.subscription_id
-    )
+    with recovery.alive(deployment_id):
+        outputs, withheld = terraform.apply(
+            deployment_id, _source(deployment), _variables(deployment), deployment.subscription_id
+        )
     db.update(deployment_id, State.succeeded, outputs=outputs, withheld=withheld)
     _outcome(deployment, "succeeded")
 
@@ -57,9 +59,10 @@ def mark_failed(deployment_id: str, error: str) -> None:
 def destroy(deployment_id: str) -> None:
     deployment = db.get(deployment_id)
     db.update(deployment_id, State.destroying)
-    terraform.destroy(
-        deployment_id, _source(deployment), _variables(deployment), deployment.subscription_id
-    )
+    with recovery.alive(deployment_id):
+        terraform.destroy(
+            deployment_id, _source(deployment), _variables(deployment), deployment.subscription_id
+        )
     db.update(deployment_id, State.destroyed)
     _outcome(deployment, "destroyed")
 

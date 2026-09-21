@@ -1,31 +1,29 @@
 # Work deployment brief (for Claude at work, using the Container Apps MCP server)
 
-You are deploying **forgeapi** into an existing, private Azure Container Apps environment using the organisation's MCP server. Everything here was built and proven in a home lab first; your job is to reproduce a known-good shape, not to design. Read this whole file before calling any tool.
+You are deploying **forgeapi** into an existing, private Azure Container Apps environment with the organisation's MCP server. Everything here was built and proven in a home lab first; your job is to reproduce a known-good shape, not to design. Read this whole file before calling any tool.
 
-**Current as of:** `main` at image tag `v0.5.0` (2026-09-21), 113 tests. forgeapi is a **dev-environment** self-service API: there is no production approval workflow, by decision. Companion documents, all in `docs/`: `tenancy.md` (business units, sizes, budgets), `audit.md`, `outputs.md`, `hosting-plan.md`, and `progress.md` (every lab run with its evidence and gaps).
+**Current as of:** `main` at image tag `v0.6.0` (2026-09-21), 121 tests. forgeapi is a **dev-environment** self-service API: there is no production approval workflow, by decision. Companion documents, all in `docs/`: `tenancy.md` (business units, sizes, budgets), `audit.md`, `outputs.md`, `hosting-plan.md`, and `progress.md` (every lab run with its evidence and gaps).
+
+## How the MCP server shapes this
+
+The MCP server takes a repository, **builds one image and deploys it as one HTTP container app with Easy Auth in front**. It decides everything about the app. Through it you can set **environment variables** and **Key Vault secret references**; nothing else. The app gets a **system-assigned managed identity**; anything else about identity is manual. So:
+
+- forgeapi runs **all in one container**: the image's default command (`python -m app.allinone`) starts a Temporal dev server, the worker and the API, and listens on port **8000** (or `$PORT` if the platform sets it). If any of the three stops, the container exits so the platform restarts it. Do not override the command.
+- A few things are **manual**, done by the engineer (or by you only when asked): role grants for the app's identity, the Easy Auth app registration's token settings, and (recommended) keeping one replica running. They are listed in [Step 4](#step-4-manual-configuration-after-the-first-deploy).
+
+How a request flows: Easy Auth signs the caller in → the API maps their Entra groups to a business unit and checks the request against that unit's rules (allowed patterns, environments, regions, sizes, budget) → it adds the values callers must not set (subscription, cost centre, network IDs) → it writes an audit event and a record to Azure Table Storage and starts a workflow on the Temporal server **inside the same container** → the worker fetches the Terraform pattern from its git repo at a pinned commit and runs `plan`/`apply` against the business unit's subscription, with state in a blob container. Outputs come back on the record; secrets stay in the pattern's own Key Vault and only references are returned.
+
+Everything that matters lives **outside** the container (records, Terraform state, logs, audit events), so replicas are disposable and several can run side by side: each has its own Temporal, so a deployment's plan and apply always meet the same worker.
 
 ## Ground rules
 
-- **Do not improvise architecture.** If the MCP server cannot do something this brief requires, stop and report what is missing. Do not substitute a workaround of your own.
-- **Read before you write.** Do the checks in [Step 0](#step-0-discover-and-verify-read-only) before creating anything.
+- **Do not improvise architecture.** If something here cannot be done, stop and report what is missing. Do not substitute a workaround of your own.
+- **Read before you write.** Do [Step 0](#step-0-discover-and-verify-read-only) before creating anything.
 - **Never print, log or paste secrets** (private keys, tokens). Reference them by Key Vault secret name only.
-- **Stop and ask the engineer** before: creating or changing role assignments, touching anything outside the three apps named here, deploying any real pattern (anything except `local-file` and `azure-identity-check`), or when a verification step fails twice.
-- Do not run `uv`, tests or local Docker. Local development is deliberately skipped at work; the code is already tested (113 tests in the lab, including real Terraform, Temporal and storage-emulator runs).
+- **Stop and ask the engineer** before: creating or changing role assignments or app registrations, deploying any real pattern (anything except `local-file` and `azure-identity-check`), or when a verification step fails twice.
+- Do not run `uv`, tests or local Docker. Local development is deliberately skipped at work; the code is already tested (121 tests in the lab, including real Terraform, Temporal and storage-emulator runs).
+- Do not change application code. The only file you edit is `patterns.yaml`.
 - Report at the end using the [report format](#report-format). State plainly what was verified and what was not.
-
-## What you are deploying
-
-One repository, two images, three container apps in the existing environment:
-
-| App | Image | Start command | Ingress | Replicas | Identity |
-| --- | --- | --- | --- | --- | --- |
-| `forgeapi-temporal` | built from `deploy/temporal/Dockerfile` | (image entrypoint) | **internal TCP 7233** | min 1, max 1 | none |
-| `forgeapi-worker` | built from the repo root `Dockerfile` | `python -m app.worker` | **none** | min 1, max 1 to start (see below) | the user-assigned identity (below) |
-| `forgeapi-api` | same image as the worker | `uvicorn app.main:app --host 0.0.0.0 --port 8000` | HTTP 8000, private endpoint, Easy Auth (as the MCP server sets up) | min 1 (or 0), max 2 | the same user-assigned identity, or one with only table access |
-
-How it works: the API identifies the caller (Easy Auth), maps their Entra groups to a business unit, checks the request against that unit's rules (allowed patterns, environments, regions, sizes, budget), adds the values callers must not set (subscription, cost centre, network IDs), writes an audit event and a record to Azure Table Storage, and starts a Temporal workflow. The worker fetches the Terraform pattern from its git repo at a pinned commit and runs `terraform plan`/`apply` against the business unit's subscription, with state in a blob container. Outputs come back on the record; secrets stay in the pattern's own Key Vault and only references are returned. Temporal starts on ACA for now; an AKS-hosted Temporal exists and can replace it later by changing one setting.
-
-**Worker replicas.** Start with one. More than one is supported from image v0.3.2: plan and apply are separate steps and may land on different replicas, so apply verifies it holds the plan for exactly this request and otherwise rebuilds the workspace and re-plans (proven with two replicas: 8 of 8 deployments succeeded, 4 of them split across replicas). This relies on remote state, so it does **not** hold for patterns that keep local state (only the built-in `local-file` example). Never point two *different* worker deployments (for example a laptop and the hosted one) at the same Temporal queue.
 
 ## Inputs the engineer must give you
 
@@ -33,42 +31,37 @@ Ask for any that are missing. Do not guess.
 
 | Input | Notes |
 | --- | --- |
-| User-assigned managed identity: resource ID, **client ID**, **principal (object) ID** | An existing identity (the organisation uses these for self-hosted GitHub runners). Terraform will act with exactly this identity's Azure rights. |
-| Tenant ID and the **platform** subscription ID (the one holding the state storage account) | Target subscriptions come from the business-unit mapping, one per business unit and environment. The identity needs its deploy rights in **every** mapped subscription. |
+| Tenant ID and the **platform** subscription ID (the one holding the state storage account) | Target subscriptions come from the business-unit mapping, one per business unit and environment. |
 | State storage: resource group, account name, blob container (default `tfstate`), table name (default `deployments`; the app also creates `deploymentslogs` and `deploymentsevents` itself) | Must be reachable from the ACA environment: private endpoints **and private DNS for both `blob` and `table`**. |
-| Pattern repositories: GitHub host, org, repo names, and sub-directory if the root module is not at the repo root | Root modules with their own `provider` and `backend "azurerm" {}` blocks, versioned by semver tags. |
-| GitHub access: either GitHub App ID + installation ID + Key Vault secret holding the App private key (PEM), **or** a Key Vault secret holding a read-only machine token | The MCP server gives the app a Key Vault; the secret is referenced, never copied. |
+| Pattern repositories: GitHub host, org, repo names, and sub-directory if the root module is not at the repo root | Runnable root modules versioned by semver tags. See the [pattern checklist](#pattern-repo-checklist). |
+| GitHub access: GitHub App ID + installation ID + a Key Vault secret holding the App private key (PEM), **or** a Key Vault secret holding a read-only machine token | Stored in the Key Vault the MCP server gives the app; referenced, never copied. |
 | Whether GitHub is github.com or GitHub Enterprise Server | GHES needs two extra settings (below). |
+| Business-unit mapping: for each BU its Entra group IDs, cost centre, allowed patterns and regions, and per (dev) environment the subscription ID, network IDs and optional `budget_monthly`; optionally top-level `auditors` group IDs | Format: `tenants.example.yaml`; rules: `docs/tenancy.md`. Supplied as configuration (Step 3). List `local-file` and `azure-identity-check` under at least one business unit's `patterns`, or verification cannot run. |
 | Egress allowlist status | See [Step 1](#step-1-egress). |
-| Business-unit mapping: for each BU its Entra group IDs, cost centre, allowed patterns and regions, and per (dev) environment the subscription ID, network IDs and optional `budget_monthly`; optionally top-level `auditors` group IDs | Format: `tenants.example.yaml`, rules: `docs/tenancy.md`. **Delivered as configuration, not baked into the image** (Step 5), so onboarding a team needs no rebuild. List `local-file` and `azure-identity-check` under at least one business unit's `patterns`, or verification cannot run. |
-| For each pattern repo: confirmation it meets the [pattern checklist](#pattern-repo-checklist) | Sizes, cost estimates and secret handling live in the pattern repos, not here. |
+| Who will do the manual steps in Step 4, and whether you are allowed to | Role grants and app registration changes usually need someone with more rights than the MCP server has. |
 
 ## Step 0: discover and verify (read-only)
 
-1. List the MCP server's tools. Confirm it can, per app: set a **custom start command**, set **environment variables**, reference **Key Vault secrets as env vars**, **disable ingress**, create **TCP ingress**, set **min/max replicas**, and **attach an existing user-assigned identity**. Record any it cannot do and stop if one is required above.
-2. Confirm the identity's role assignments (ask the engineer to grant what is missing; do not grant them yourself):
-   - `Storage Blob Data Contributor` on the state container;
-   - `Storage Table Data Contributor` on the storage account (covers all three tables: records, logs, audit events; the app creates them on first use);
-   - whatever the patterns need on the target scope (typically `Contributor`, plus `Role Based Access Control Administrator` if patterns assign roles, plus Microsoft Graph `Group.ReadWrite.All` and `User.Read.All` if patterns create Entra groups);
-   - `Key Vault Secrets User` on the app's Key Vault, for the GitHub secret.
-3. Confirm the `Microsoft.App` resource provider is registered (it will be, since the environment exists).
+1. List the MCP server's tools and their options. Confirm how to set **environment variables** and **Key Vault secret references**, which **port** it expects the app to listen on (forgeapi uses 8000 and honours `$PORT`), and whether a **redeploy updates the same app** or recreates it. If it recreates it, the system-assigned identity changes and every role grant in Step 4 is lost on each deploy: stop and tell the engineer, because a manually attached user-assigned identity is then the only workable choice.
+2. Confirm the state storage account, container and private endpoints/DNS exist.
+3. Confirm the pattern repositories and tags exist and that the GitHub credential covers **every** repo involved, including modules the patterns reference.
 
 ## Step 1: egress
 
-Outbound internet is restricted. At **run time** the worker needs HTTPS to:
+Outbound internet is restricted. At **run time** the app needs HTTPS to:
 
 - the GitHub host (pattern and module fetches) and, for github.com, `codeload.github.com`;
 - `registry.terraform.io`, `releases.hashicorp.com`, and `github.com` + `objects.githubusercontent.com` (provider downloads; non-HashiCorp providers such as `Azure/azapi` are served from GitHub releases);
 - `login.microsoftonline.com`, `management.azure.com`, `graph.microsoft.com`;
 - the storage account and Key Vault (through their private endpoints).
 
-At **build time** the image pulls `hashicorp/terraform:1.15.9` (Docker Hub), `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`, Debian apt packages (`git`), PyPI packages, and `temporalio/temporal:1.8.3` (Docker Hub) for the Temporal image. If the MCP server's build environment cannot reach those, stop and report: the engineer needs mirrored base images, and you should only change the `FROM` lines to the mirrors they name.
+At **build time** the image pulls `hashicorp/terraform:1.15.9` and `temporalio/temporal:1.8.3` (Docker Hub), `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`, Debian apt packages (`git`) and PyPI packages. If the MCP server's build environment cannot reach those, stop and report: the engineer needs mirrored base images, and you should only change the `FROM` lines to the mirrors they name.
 
-If the Terraform registry cannot be allowlisted, stop and report. The known fix (bake a provider mirror into the image with `terraform providers mirror` and a `filesystem_mirror` CLI config) is not built yet.
+If the Terraform registry cannot be allowlisted, stop and report. The known fix (bake a provider mirror into the image) is not built yet.
 
-## Step 2: edit the catalog, then build
+## Step 2: edit the catalog
 
-`patterns.yaml` is baked into the image. (The business-unit mapping is **not**: it is tenant-specific and gitignored, and is supplied as configuration in Step 5.) Replace the lab entries with the work pattern repos **before** building. Keep the two built-in examples; they are your verification tools.
+`patterns.yaml` is baked into the image. Replace the lab entries with the work pattern repos. Keep the two built-in examples; they are your verification tools.
 
 ```yaml
 patterns:
@@ -83,83 +76,99 @@ patterns:
     local: examples/azure-identity-check
 ```
 
-Build two images with the MCP server: the repo root `Dockerfile`, and `deploy/temporal/Dockerfile`. Do not change application code.
+## Step 3: deploy with the MCP server
 
-## Step 3: deploy Temporal
-
-Create `forgeapi-temporal` from the Temporal image: internal **TCP** ingress, target and exposed port 7233, min/max replicas 1, no identity, no env vars. Easy Auth only applies to HTTP, so it does not cover (or block) this port.
-
-The Temporal web UI listens on 8233 in the same container. Expose it **only** if the MCP server supports an HTTP ingress with Easy Auth **plus** an additional TCP port mapping for 7233 on the same app. If it cannot do both, leave the UI unexposed; do not make 7233 HTTP.
-
-History is in memory: restarting this app forgets workflow history. Deployment records and Terraform state are not affected, and `retry` recovers a deployment interrupted by a restart.
-
-## Step 4: deploy the worker
-
-`forgeapi-worker`: app image, command `python -m app.worker`, **no ingress**, min 1 / max 1 to begin with, user-assigned identity attached. CPU 0.5 / memory 1Gi is enough.
-
-Environment (worker **and** API get all of these; differences noted):
+Deploy the repository as one app. Leave the command alone. Settings:
 
 | Variable | Value |
 | --- | --- |
-| `FORGEAPI_DATA_DIR` | `/tmp/forgeapi` |
-| `FORGEAPI_TEMPORAL_ADDRESS` | `forgeapi-temporal:7233` (the Temporal app's name inside the environment) |
-| `FORGEAPI_TEMPORAL_NAMESPACE` | `default` |
+| `FORGEAPI_DATA_DIR` | `/tmp/forgeapi` (throwaway; nothing important is kept on the container's disk) |
 | `FORGEAPI_DB_BACKEND` | `table` |
 | `FORGEAPI_TABLE_STORAGE_ACCOUNT` | state storage account name |
 | `FORGEAPI_TABLE_NAME` | `deployments` |
 | `FORGEAPI_AZURE_USE_MANAGED_IDENTITY` | `true` |
-| `FORGEAPI_AZURE_MANAGED_IDENTITY_CLIENT_ID` | the identity's **client ID** |
 | `FORGEAPI_AZURE_TENANT_ID` | tenant ID |
 | `FORGEAPI_AZURE_SUBSCRIPTION_ID` | the **platform** subscription ID (where the state storage account lives). Deployments target the business unit's subscription from the mapping; state always stays here. |
 | `FORGEAPI_STATE_RESOURCE_GROUP` | state storage resource group |
 | `FORGEAPI_STATE_STORAGE_ACCOUNT` | state storage account name |
 | `FORGEAPI_STATE_CONTAINER` | `tfstate` |
-| `FORGEAPI_AUTH_MODE` | `easyauth` (see Step 5) |
+| `FORGEAPI_AUTH_MODE` | `easyauth` |
+| `FORGEAPI_TENANTS_YAML` | the business-unit mapping as YAML text, **as a Key Vault secret reference** (it is multi-line and changes whenever a team is onboarded; it holds group and subscription IDs, not credentials). Onboarding is then: update the secret, restart the app. |
 | GitHub App: `FORGEAPI_GITHUB_APP_ID`, `FORGEAPI_GITHUB_APP_INSTALLATION_ID`, and `FORGEAPI_GITHUB_APP_PRIVATE_KEY` **as a Key Vault secret reference** | preferred |
 | …or machine token: `FORGEAPI_GITHUB_TOKEN` **as a Key Vault secret reference** | alternative |
 | GHES only: `FORGEAPI_GITHUB_HOST` = `<host>`, `FORGEAPI_GITHUB_API_URL` = `https://<host>/api/v3` | omit for github.com |
 
-**Do not set** `FORGEAPI_AZURE_FEDERATED_CLIENT_ID`, `FORGEAPI_AZURE_CLIENT_ID` or `FORGEAPI_AZURE_CLIENT_CERTIFICATE_PATH`. Those are lab-only sign-in modes and the first one takes precedence over managed identity. Also never set `FORGEAPI_DEV_GROUPS` (it hands group memberships to unauthenticated local callers; it is ignored under `easyauth`, but it has no place in a hosted app) or `FORGEAPI_TABLE_CONNECTION_STRING` (storage emulator, tests only; real access is by managed identity). `FORGEAPI_CATALOG_PATH`, `FORGEAPI_TASK_QUEUE` and `FORGEAPI_TERRAFORM_BIN` have working defaults; leave them alone.
+**Leave unset:**
 
-Why managed identity works here: Terraform can only ask the VM metadata address for tokens, which Container Apps does not have. The worker runs a loopback token endpoint (`app/msi_shim.py`) backed by the Azure SDK and points Terraform at it. No app registration, federated credential or secret is involved; the attached identity's own role assignments apply.
+- `FORGEAPI_TEMPORAL_ADDRESS` and `FORGEAPI_TEMPORAL_NAMESPACE`. Unset means "run Temporal inside this container". (Setting the address switches the local server off; see [Moving to the AKS Temporal](#moving-to-the-aks-temporal-later).)
+- `FORGEAPI_AZURE_MANAGED_IDENTITY_CLIENT_ID`. Only for a user-assigned identity; the system-assigned one needs no ID.
+- `FORGEAPI_AZURE_FEDERATED_CLIENT_ID`, `FORGEAPI_AZURE_CLIENT_ID`, `FORGEAPI_AZURE_CLIENT_CERTIFICATE_PATH`: lab-only sign-in modes; the first takes precedence over managed identity.
+- `FORGEAPI_DEV_GROUPS` (hands group memberships to unauthenticated local callers) and `FORGEAPI_TABLE_CONNECTION_STRING` (storage emulator, tests only).
+- `FORGEAPI_TENANTS_PATH` (a baked-in mapping file; every change would need a rebuild), `FORGEAPI_ENTRA_TENANT_ID` and `FORGEAPI_ENTRA_AUDIENCE` (only for `FORGEAPI_AUTH_MODE=entra`, where the app validates tokens itself instead of trusting Easy Auth).
+- `FORGEAPI_CATALOG_PATH`, `FORGEAPI_TASK_QUEUE`, `FORGEAPI_TERRAFORM_BIN`, `FORGEAPI_STALE_AFTER_SECONDS`: working defaults.
 
-## Step 5: deploy the API
+Without the mapping the API runs single-tenant with **no** placement, ownership or budgets. Do not leave it that way at work.
 
-`forgeapi-api`: same image, command `uvicorn app.main:app --host 0.0.0.0 --port 8000`, HTTP ingress on 8000 behind the private endpoint, Easy Auth as the MCP server configures it, same env vars, identity attached (it needs the table role and Key Vault secret access; it never runs Terraform).
+Why managed identity works: Terraform can only ask the VM metadata address for tokens, which Container Apps does not have. The worker runs a loopback token endpoint (`app/msi_shim.py`) backed by the Azure SDK and points Terraform at it. No app registration, federated credential or secret is involved; the identity's own role assignments apply.
 
-Auth: set `FORGEAPI_AUTH_MODE=easyauth`. Easy Auth signs the caller in and passes their identity and Entra groups to the app in the `X-MS-CLIENT-PRINCIPAL` header (it strips any copy a client sends, which is why this mode is only safe behind Easy Auth; never use it on an app without it). The business-unit mapping then decides what that caller may deploy and where. **The Easy Auth app registration must emit group claims** (token configuration → groups claim → *Groups assigned to the application*, which also avoids the too-many-groups overage); confirm this with the engineer, and verify with `GET /me` that the caller's business units appear. (The app's own `entra` mode also exists: set `FORGEAPI_AUTH_MODE=entra`, `FORGEAPI_ENTRA_TENANT_ID`, and `FORGEAPI_ENTRA_AUDIENCE` = the **client ID** of the Easy Auth app registration, which requires that registration to issue v2 tokens. Only do this if asked.)
+## Step 4: manual configuration after the first deploy
 
-**Business-unit mapping (API app only; the worker does not need it).** Set `FORGEAPI_TENANTS_YAML` to the mapping's YAML text. Preferred: store the text as a secret in the app's Key Vault and reference it, because it is multi-line and changes whenever a team is onboarded; updating the secret and restarting the API revision is then all that onboarding takes. It contains group and subscription IDs, not credentials. (Alternative: bake a file into the image and set `FORGEAPI_TENANTS_PATH`; then every mapping change is a rebuild.) Without either setting the API runs single-tenant with **no** placement, ownership or budgets: do not deploy it that way at work.
+The system-assigned identity only exists once the app does, so the first start will answer `/healthz` but cannot do anything else yet. Get the identity's **principal (object) ID** from the app, then the engineer (or you, only if asked) sets up:
 
-`/healthz` needs no token and is safe for probes.
+1. **Roles for the app's identity**
+   - `Storage Table Data Contributor` on the state storage account (covers the three tables: records, logs, audit events);
+   - `Storage Blob Data Contributor` on the state container;
+   - `Key Vault Secrets User` on the app's Key Vault, if the MCP server has not already granted it (needed for the secret references);
+   - the deploy rights the patterns need **in every subscription in the mapping**: typically `Contributor`, plus `Role Based Access Control Administrator` if patterns assign roles;
+   - Microsoft Graph application permissions `Group.ReadWrite.All` and `User.Read.All` **if** patterns create Entra groups. Granting Graph app roles to a managed identity is a directory-admin action.
+   Role assignments take a few minutes to take effect; restart the app afterwards so the secret references resolve.
+2. **The Easy Auth app registration** (the "custom config for the SPN used by Easy Auth")
+   - **Emit group claims:** token configuration → groups claim → *Groups assigned to the application*, and assign each business unit's group (and any auditors group) to the enterprise application. forgeapi decides the business unit from these claims; this setting also avoids the too-many-groups overage. Verify with `GET /me`.
+   - **Pipelines and service principals:** they must be able to get a token for this app registration and be let through Easy Auth (allowed client applications / token audience), and the service principal must be a member of a business unit's group. A caller with no recognised group gets 403 and sees nothing.
+   - **Browsers:** people sign in through Easy Auth and can use the interactive API page at `/docs`.
+3. **Keep one replica running (strongly recommended).** An HTTP app scales to zero after a few idle minutes, and an apply can run much longer than that while nobody is calling the API. Ask the engineer to set **minimum replicas to 1** on the app. See the next section for what happens without it.
 
-## Step 6: verify, in this order
+## Interruptions: what happens when the app is stopped mid-deployment
 
-Call the API through whatever authenticated path Easy Auth allows (ask the engineer how they obtain a token or session). Stop at the first failure and consult [Troubleshooting](#troubleshooting).
+Scale-in, a platform restart, a new revision or a crash can stop the container while Terraform is running. This is handled, and was proven in the lab by killing a container mid-apply:
+
+- A running job beats on its record every 30 seconds. A deployment that claims to be running but has not moved for 5 minutes is marked `failed` with `interrupted: the worker stopped while this was running. Retry to continue…`, and an audit event `deployment.state interrupted` is written.
+- `POST /deployments/{id}/retry` continues from the existing Terraform state. The killed run leaves its **state lock** behind (`state blob is already locked`); forgeapi releases it once with `terraform force-unlock` and carries on. This is safe because forgeapi runs one job per deployment at a time. `DELETE` recovers the same way.
+- Temporal's history lives in the container and is lost with it. That is fine: nothing depends on it after a restart.
+
+So an interruption costs a retry, not a stuck or orphaned deployment. With minimum replicas at 1 it should be rare. Without it, expect long applies to be interrupted whenever the API goes quiet.
+
+## Step 5: verify, in this order
+
+Call the API through whatever authenticated path Easy Auth allows. Stop at the first failure and consult [Troubleshooting](#troubleshooting).
 
 1. `GET /healthz` → `200 {"status":"ok"}`.
-2. `GET /me` → the caller's business units, the environments they may deploy to, regions, patterns and **budget position**. `"business_units": null` means the mapping is not configured (stop: see Step 5). An empty list means group claims are not reaching the app or the mapping has the wrong group IDs.
-2b. `GET /patterns` → only the patterns the caller's business units allow.
-3. `GET /patterns/<a real pattern>` → versions (tags) and inputs. Proves GitHub access. `502` means it does not work yet.
-4. `POST /deployments` `{"pattern":"local-file","environment":"<env>","inputs":{"filename":"hello.txt","content":"hi"}}` (the two example patterns must be listed under a business unit's `patterns` for this), poll `GET /deployments/<id>` until `succeeded`. Proves API → Table Storage → Temporal → worker → Terraform, with no Azure sign-in involved.
-5. `POST /deployments` `{"pattern":"azure-identity-check","environment":"<env>","inputs":{"note":"work identity test"}}` → `succeeded`, and **`outputs.signed_in_object_id` equals the identity's principal (object) ID**. This pattern creates nothing; it proves Terraform signs in as the identity and can write remote state.
-5b. `GET /deployments/<id>/logs` returns Terraform output (not empty), and `GET /deployments/<id>/events` shows `deployment.create accepted` followed by `deployment.state succeeded`. Proves the shared log and audit tables work across the two containers.
-6. `DELETE /deployments/<id>` for both; each ends `destroyed`, and the budget position in `GET /me` returns to where it started.
-7. `GET /patterns/<a real pattern>`: `placement` shows the sizes offered in the environment and their estimated monthly cost; platform-supplied inputs (environment, business unit, cost centre, network IDs, sized values) are **absent** from `inputs`. Then `POST /deployments?dry_run=true` with the engineer's inputs, `environment` and `size` → `{"valid": true}` with `injected` values and the budget impact. Creates nothing and is not audited.
-8. **Only with the engineer's explicit go-ahead:** deploy one real, cheap pattern; verify the resource independently, **including that its tags carry the business unit and cost centre the caller never sent**; check `secret_references` / `withheld_outputs` if the pattern produces secrets; `DELETE` it.
+2. `GET /me` → the caller's business units, the environments they may deploy to, regions, patterns and **budget position**. `"business_units": null` means the mapping is not configured (stop: see Step 3). An empty list means group claims are not reaching the app or the mapping has the wrong group IDs.
+3. `GET /patterns` → only the patterns the caller's business units allow. `GET /patterns/<a real pattern>` → versions (tags) and inputs; proves GitHub access. `502` means it does not work yet.
+4. `POST /deployments` `{"pattern":"local-file","environment":"<env>","inputs":{"filename":"hello.txt","content":"hi"}}`, poll `GET /deployments/<id>` until `succeeded`. Proves API → Table Storage → Temporal → worker → Terraform with no Azure sign-in involved.
+5. `POST /deployments` `{"pattern":"azure-identity-check","environment":"<env>","inputs":{"note":"work identity test"}}` → `succeeded`, and **`outputs.signed_in_object_id` equals the app identity's principal (object) ID**. This pattern creates nothing; it proves Terraform signs in as the identity and can write remote state.
+6. `GET /deployments/<id>/logs` returns Terraform output (not empty), and `GET /deployments/<id>/events` shows `deployment.create accepted` followed by `deployment.state succeeded`.
+7. `DELETE /deployments/<id>` for both; each ends `destroyed`, and the budget position in `GET /me` returns to where it started. `GET /deployments` lists them.
+8. `GET /patterns/<a real pattern>`: `placement` shows the sizes offered in the environment and their estimated monthly cost; platform-supplied inputs (environment, business unit, cost centre, network IDs, sized values) are **absent** from `inputs`; `GET /patterns/<name>/schema` returns JSON Schema. Then `POST /deployments?dry_run=true` with the engineer's inputs, `environment` and `size` → `{"valid": true}` with `injected` values and the budget impact. Creates nothing and is not audited.
+9. **Only with the engineer's explicit go-ahead:** deploy one real, cheap pattern; verify the resource independently, **including that its tags carry the business unit and cost centre the caller never sent**; check `secret_references` / `withheld_outputs` if the pattern produces secrets; `PUT /deployments/<id>` with one changed input to see an in-place update; `DELETE` it. `GET /events` shows the whole history.
+
+## Moving to the AKS Temporal later
+
+Set `FORGEAPI_TEMPORAL_ADDRESS` (and `FORGEAPI_TEMPORAL_NAMESPACE`) to the existing service. The container then starts only the worker and the API, workflow history survives restarts, and every replica shares one queue (supported: apply checks it holds the plan for exactly this request and otherwise re-plans). Two limits today: connections that need **mTLS or an API key are not supported by the code yet**, and patterns that keep local state (only the built-in `local-file` example) need a single replica in that setup.
 
 ## API quick reference
 
 | Call | Purpose |
 | --- | --- |
-| `GET /patterns`, `GET /patterns/{name}?version=`, `GET /patterns/{name}/schema` | catalog, inputs with allowed values and an example request, JSON Schema |
 | `GET /me` | the caller's business units, environments, regions, patterns, budgets |
+| `GET /patterns`, `GET /patterns/{name}?version=`, `GET /patterns/{name}/schema` | catalog, inputs with allowed values and an example request, JSON Schema |
 | `POST /deployments` (`?dry_run=true` to validate only) | deploy `{"pattern","environment","size"?,"version"?,"business_unit"?,"inputs"}`. `business_unit` only when the caller belongs to several; `size` when the pattern defines sizes |
 | `GET /deployments`, `GET /deployments/{id}`, `GET /deployments/{id}/logs` | the caller's units' deployments; state, outputs, `secret_references`, `withheld_outputs`, error; Terraform log |
 | `GET /deployments/{id}/events`, `GET /events` | audit trail (read-only) |
-| `PUT /deployments/{id}` | new inputs and/or version, applied against existing state |
-| `POST /deployments/{id}/retry` | finish a failed deployment |
+| `PUT /deployments/{id}` | new inputs, size and/or version, applied against existing state |
+| `POST /deployments/{id}/retry` | finish a failed or interrupted deployment |
 | `DELETE /deployments/{id}` | `terraform destroy`; record kept as `destroyed` |
+| `GET /healthz` | liveness; needs no sign-in |
 
 ## Troubleshooting
 
@@ -167,37 +176,35 @@ Every entry below actually happened in the lab.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `503 deployment records are temporarily unavailable`, or `AuthorizationPermissionMismatch` in API logs | Table role missing or granted under ~2 minutes ago | confirm the role; wait; retry |
-| `ManagedIdentityAuthorizer … 169.254.169.254 … connection refused` | `FORGEAPI_AZURE_USE_MANAGED_IDENTITY` not `true`, or an image older than v0.1.3 | fix the env var / rebuild |
-| `signed_in_object_id` is not the identity's principal ID | a federated or certificate setting is present | remove the "do not set" variables |
-| `missing or corrupted provider plugins`, `cached package … does not match`, `text file busy` | an image older than v0.3.2 (parallel deployments corrupted Terraform's shared provider cache, even on one replica), or two different worker deployments on one Temporal queue | use v0.3.2+; one worker deployment per Temporal |
-| `GET …/logs` is empty although the deployment ran | an image older than v0.3.2 (logs stayed on the worker's disk) | use v0.3.2+; logs are stored in the `deploymentslogs` table |
-| `502` on `GET /patterns/{name}` or at POST | cannot reach/authenticate to GitHub | check egress, App installation covers the repo **and every module repo it references**, secret reference resolves |
-| Container app revision fails: `Unable to get value using Managed identity … for secret` | identity lacks `Key Vault Secrets User`, or the role is too new | grant/wait, then redeploy the revision |
-| `503 job engine unavailable` on POST | API cannot reach Temporal | Temporal app running? TCP ingress 7233 internal? address is `<app-name>:7233` |
+| `503 deployment records are temporarily unavailable`, or `AuthorizationPermissionMismatch` in the app's logs | Table role missing or granted under ~2 minutes ago | confirm the role; wait; retry |
+| `503 the audit trail is unavailable, so the request was not carried out` | same cause, hit while writing the audit event | same fix; nothing was started |
+| App revision fails: `Unable to get value using Managed identity … for secret` | identity lacks `Key Vault Secrets User`, or the role is too new | grant/wait, then restart the revision |
+| `ManagedIdentityAuthorizer … 169.254.169.254 … connection refused` | `FORGEAPI_AZURE_USE_MANAGED_IDENTITY` is not `true` | fix the setting |
+| `signed_in_object_id` is not the app identity's principal ID | a federated, certificate or client-ID setting is present | remove the "leave unset" variables |
+| The container keeps restarting; logs show `[allinone] … exited` | one of the three processes died; the supervisor stops the rest on purpose | read the lines just before it. Usual causes: a wrong setting, or storage/Key Vault unreachable |
+| A deployment shows `failed` with `interrupted: the worker stopped…` | the container was stopped mid-run (scale-in, restart, new revision) | `POST …/retry`. Set minimum replicas to 1 if it keeps happening |
+| `Error acquiring the state lock` as the **final** error of a deployment | the automatic unlock was already tried once and the lock is still held: something other than forgeapi holds it (a person running Terraform against that state) | find out who; never unlock by hand without knowing |
+| `GET /me` shows `"business_units": null` | the mapping is not configured | set `FORGEAPI_TENANTS_YAML` (Step 3) |
+| `GET /me` shows no business units for someone who should have one | Easy Auth is not passing group claims, the group is not assigned to the enterprise application, or wrong group IDs in the mapping | Step 4.2; compare object IDs |
+| `422 name an environment` / `name a size; <env> offers [...]` | request lacks `environment`, or the pattern defines sizes and none was chosen | add them |
+| `422 size '<x>' is not offered in <env>` with an **empty** list | the pattern's `config.yaml` sizing keys do not match the environment names | fix the pattern repo and tag a new version |
+| `403 … declares no estimated cost` | the environment has a `budget_monthly` and the pattern's `config.yaml` has no `estimated_costs` for it | add estimates to the pattern (`estimated_costs: 0` if genuinely free) |
+| `403 this would exceed the estimated monthly budget` | working as designed; the response gives the figures | destroy unused deployments, choose a smaller size, or raise the budget |
+| `502` on `GET /patterns/{name}` or at POST | cannot reach or authenticate to GitHub | egress; the credential covers the repo **and every module repo it references**; the secret reference resolves |
 | `Failed to query available provider packages` / registry timeouts in deployment logs | egress to the Terraform registry blocked | allowlist, or stop and report (provider mirror not built) |
-| Deployment stuck in `planning`/`applying` after a Temporal restart | in-memory history lost | it will not resume; set nothing by hand, use `POST …/retry` once it is marked failed, or ask the engineer |
-| `GET /me` shows `"business_units": null` | the mapping is not configured on the API app | set `FORGEAPI_TENANTS_YAML` (Step 5) |
-| `GET /me` shows no business units for someone who should have one | Easy Auth is not passing group claims (or too many groups: overage), or wrong group IDs in the mapping | app registration → token configuration → groups claim → *Groups assigned to the application*; compare object IDs |
-| `422 name an environment` / `name a size; <env> offers [...]` | request lacks `environment`, or the pattern defines sizes and none was chosen | add them; sizes offered per environment come from the pattern's `config.yaml` |
-| `422 size '<x>' is not offered in <env>` with an **empty** list | the pattern's `config.yaml` sizing keys do not match the environment names (`dev`, `stg`, `prd`, …) | fix the pattern repo and tag a new version |
-| `403 … declares no estimated cost` | the environment has a `budget_monthly` and the pattern's `config.yaml` has no `estimated_costs` for it | add estimates to the pattern (or `estimated_costs: 0` if it is genuinely free) |
-| `403 this would exceed the estimated monthly budget` | working as designed; the response gives the figures | destroy unused deployments, choose a smaller size, or raise the budget in the mapping |
-| `503 the audit trail is unavailable, so the request was not carried out` | the API could not write the audit event (Table access) | same causes as the first row; nothing was started |
 | `withheld_outputs` is not empty | the pattern outputs a `sensitive` value instead of storing it in a vault | pattern bug: see `docs/outputs.md` |
-| A poll returns a non-JSON body right after the API app was updated | seen in the lab within a minute or two of a revision change; not reproduced on demand, cause unconfirmed | retry the request; capture the status code if it persists |
+| A poll returns a non-JSON body right after the app was updated | seen in the lab within a minute or two of a revision change; cause unconfirmed | retry the request |
 | `MissingSubscriptionRegistration` for some namespace | target subscription has never used that resource type | engineer registers the provider |
 
 ## Known limits to tell the engineer about
 
-- In-memory Temporal history. Patterns that keep local state need a single worker replica.
+- **The identity.** The system-assigned identity is tied to the app: if the app is ever recreated, every grant in Step 4 must be redone. Whatever identity Terraform runs as, every API caller deploys with its reach in every mapped subscription, and patterns that grant the deploying identity data access (the lab key-vault module makes it Secrets Officer on each vault it creates) let that identity read those secrets.
+- **Temporal in the container** keeps history in memory. Interruptions are recovered (above) but cost a retry. There is no Temporal web UI in this setup.
 - Authorization is by business unit and environment (Entra groups), with estimated-cost budgets. Budgets use the pattern authors' estimates, not Azure billing, and two simultaneous requests can overshoot slightly. No deployment counts, expiry, approvals or per-pattern-version limits.
-- **Choice of identity.** Reusing a GitHub-runner identity means every API caller deploys with that identity's reach, in every mapped subscription. Patterns that grant the deploying identity data access (the lab key-vault module makes it Secrets Officer on each vault it creates) also let that identity read those secrets. A dedicated identity with narrower rights is the better long-term choice.
 - The audit trail is append-only through the API but the storage is not immutable, and there is no retention or export. Sensitive **inputs** are stored in clear on the deployment record; pass secrets as Key Vault references. Details: `docs/audit.md`.
-- To stop the worker or Temporal, deactivate the app's revision. Setting min replicas to 0 does **not** stop an app that has no HTTP scale rule (found the hard way in the lab).
 - GitHub App token support is unit-tested only; it has not been run against a real App. A machine token through a Key Vault reference **has** been proven end to end.
 - The Terraform provider mirror for fully closed egress is not built.
-- Moving to the AKS Temporal later: change `FORGEAPI_TEMPORAL_ADDRESS`/`NAMESPACE` on both apps and delete `forgeapi-temporal`. Connections needing mTLS or an API key are not supported by the code yet.
+- **Never proven anywhere:** Easy Auth's identity header and group claims reaching forgeapi (`FORGEAPI_AUTH_MODE=easyauth` is unit-tested only; the lab used the app's own token validation), a system-assigned identity running Terraform (the lab proved a user-assigned one through the same code path), private endpoints, restricted egress, and this MCP server.
 
 ## Pattern repo checklist
 
@@ -207,14 +214,15 @@ Most behaviour callers see is defined in the pattern repositories, read at the p
 2. `variable` blocks have accurate `description`s, `type`s and `validation` rules with clear `error_message`s: these are the API's user-facing documentation and validation.
 3. To receive platform values it **declares variables with these exact names**: `environment`, `business_unit`, `cost_center`, `location`, plus any network keys used in the mapping (for example `private_endpoint_subnet_id`). Declared ones are filled by the platform and hidden from callers; undeclared ones are simply not passed.
 4. `config.yaml` beside the root module (or at the repo root) has `description`, and where relevant `sizing.<size>.<environment>.<variable>` and `estimated_costs.<size>.<environment>` (or `.<environment>`, or one number). **Environment keys must match the mapping's environment names.** A size locks the inputs it sets. Without `estimated_costs` the pattern is refused wherever a budget exists.
-5. Secrets follow `docs/outputs.md`: prefer Entra authentication and no secret; otherwise the pattern stores the secret in a Key Vault it creates and outputs the **versionless secret ID**, and grants read access itself (groups owned by the request's `owners`, or the workload's identity). Never output a secret value, even marked `sensitive`.
+5. Secrets follow `docs/outputs.md`: prefer Entra authentication and no secret; otherwise the pattern stores the secret in a Key Vault it creates and outputs the **versionless secret ID**, and grants read access itself. Never output a secret value, even marked `sensitive`.
 
 ## Report format
 
 ```
-Deployed: <apps, image tags, identity used>
-Verified: <numbered Step 6 checks that passed, with deployment IDs>
+Deployed: <app name, image, identity principal ID>
+Manual steps: <done by whom | still open>
+Verified: <numbered Step 5 checks that passed, with deployment IDs>
 Not verified / skipped: <which, and why>
 Deviations from the brief: <none | list>
-Open items for the engineer: <role grants, egress, decisions>
+Open items for the engineer: <role grants, app registration, egress, minimum replicas, decisions>
 ```

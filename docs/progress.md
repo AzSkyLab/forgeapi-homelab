@@ -459,3 +459,26 @@ The engineer asked whether the work brief had been maintained. It had been updat
 **Guard against drift:** `tests/test_docs.py` fails if the brief names a setting that does not exist, omits a setting that does, or omits an endpoint. `AGENTS.md` now requires the brief to be updated in the same PR as any change that affects deployment. Tests: 113 passing.
 
 **Not verified:** the brief has never been executed; nothing has been deployed in the work environment.
+
+## 2026-09-21 — One-container mode and recovery from interrupted runs (branch `all-in-one`)
+
+**New facts from the engineer about the work MCP server:** it builds one image and deploys it as **one HTTP app with Easy Auth**; only environment variables and Key Vault references can be set through it; the app has a **system-assigned** identity and anything else about identity is manual; callers are browsers and pipelines/service principals. The three-app layout in the earlier brief cannot be deployed that way.
+
+**Built:**
+
+- `app/allinone.py`, now the image's default command: Temporal dev server + worker + API in one container; exits if any child stops; honours `$PORT`; skips the local Temporal when `FORGEAPI_TEMPORAL_ADDRESS` is set. Image gains the Temporal CLI, a real user entry and a writable `/data`. Compose sets its own Temporal address instead of the image.
+- `app/recovery.py`: running jobs beat on their record every 30 s; a sweeper marks in-flight deployments that have not moved for `FORGEAPI_STALE_AFTER_SECONDS` (300) as `failed: interrupted…` with an audit event. `terraform._run` releases a dead run's **state lock** once (`force-unlock`) and repeats the command.
+- `docs/work-deployment.md` rewritten for the one-app shape: what the MCP server does vs. the manual steps (roles for the app identity, Easy Auth app registration group claims and pipeline access, minimum replicas 1), the interruption section, and an explicit list of what has never been proven anywhere.
+
+| Check | Result |
+| --- | --- |
+| `uv run pytest` / `ruff` | PASS: 121 / clean (lock-ID parsing, unlock-once-then-repeat, no unlock loop, sweeper, heartbeat, retry/destroy after interruption, `touch` on both stores; brief-vs-code tests) |
+| One container, local: `local-file` deployment | PASS: `succeeded`, audit events and logs present |
+| Kill the worker inside the container | PASS: `[allinone] worker exited with -9; stopping the rest`, container exited |
+| `docker stop` (SIGTERM, as on scale-in) | PASS: stopped in 1 s |
+| **Real interruption against Azure:** one container, real `resource-group` deployment, `docker kill` while `applying`, container restarted | PASS: stuck `applying` → marked `interrupted` ~1 min later (60 s window for the test); `retry` hit `Error acquiring the state lock … state blob is already locked`, released lock `38221561-…`, re-planned, `Apply complete`; audit trail shows create → interrupted (recovery) → retry → succeeded; then `DELETE` → `destroyed` |
+| Compose stack after the image change | PASS: deployment `succeeded` |
+
+**Bugs found on the way:** the image's baked-in `FORGEAPI_TEMPORAL_ADDRESS` made the supervisor think an external Temporal was configured; the Temporal binary refuses to start for a bare UID (`$USER set in environment`); `/data` was root-owned for a plain volume.
+
+**Never proven anywhere (also listed in the brief):** Easy Auth's identity header and group claims reaching forgeapi; a system-assigned identity running Terraform (a user-assigned one is proven through the same code path); the one-container image on Container Apps; private endpoints; restricted egress; the MCP server.

@@ -106,7 +106,9 @@ def _first_error(output: str) -> str:
     return " ".join(text.split())[:800]
 
 
-def _run(deployment_id: str, *args: str, subscription_id: str | None = None) -> str:
+def _run(
+    deployment_id: str, *args: str, subscription_id: str | None = None, _unlock_once: bool = True
+) -> str:
     workdir = deployment_dir(deployment_id) / "work"
     with _CACHE.held(exclusive=args[0] == "init"):
         result = subprocess.run(
@@ -122,9 +124,24 @@ def _run(deployment_id: str, *args: str, subscription_id: str | None = None) -> 
     shown = " ".join(a for a in args if not a.startswith("-backend-config"))
     logs.append(deployment_id, f"$ terraform {shown}\n{logged}\n")
     if result.returncode != 0:
+        lock = lock_id(result.stderr)
+        if lock and _unlock_once:
+            # forgeapi runs one job per deployment at a time, so a held lock can only belong to
+            # a run whose worker was stopped mid-way (scale-in, restart). Release it and go on.
+            logs.append(deployment_id, f"# state lock {lock} belongs to an interrupted run\n")
+            _run(deployment_id, "force-unlock", "-force", lock, subscription_id=subscription_id)
+            return _run(deployment_id, *args, subscription_id=subscription_id, _unlock_once=False)
         detail = _first_error(result.stderr) or f"exit {result.returncode}"
         raise TerraformError(f"terraform {args[0]} failed: {detail}")
     return result.stdout
+
+
+def lock_id(stderr: str) -> str | None:
+    """The lock ID from Terraform's "Error acquiring the state lock" message, if that is it."""
+    if "Error acquiring the state lock" not in stderr:
+        return None
+    match = re.search(r"^\s*ID:\s+([0-9a-fA-F-]{8,})\s*$", stderr, re.M)
+    return match.group(1) if match else None
 
 
 def _backend_args(deployment_id: str) -> list[str]:

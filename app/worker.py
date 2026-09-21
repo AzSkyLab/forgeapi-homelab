@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from app import activities
+from app import activities, recovery
 from app.settings import settings
 from app.workflows import DeployWorkflow, DestroyWorkflow
 
@@ -24,6 +24,7 @@ def build_worker(client: Client) -> Worker:
 async def main() -> None:
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
     print(f"worker polling {settings.task_queue!r} on {settings.temporal_address}")
+    recovery.sweep_forever()
     await build_worker(client).run()
 
 
