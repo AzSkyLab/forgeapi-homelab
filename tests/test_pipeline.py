@@ -278,3 +278,22 @@ def test_a_plan_left_over_from_an_earlier_request_is_never_applied():
     assert Path(db.get(deployment.id).outputs["path"]).read_text() == "new request"
     workdir = terraform.deployment_dir(deployment.id) / "work"
     assert not (workdir / "tfplan").exists()  # a plan is applied once, then removed
+
+
+def test_concurrent_first_time_deployments_share_a_cold_provider_cache():
+    """Regression: parallel `terraform init`s downloading into the shared plugin cache corrupted
+    it on the hosted worker. Inits are serialised per worker; everything else stays parallel."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    source = catalog.resolve("demo", None).terraform_source
+    deployments = [_accept("demo", {"filename": f"{n}.txt", "content": str(n)}) for n in range(4)]
+    assert not (settings.data_dir / "plugin-cache").exists()  # cold
+
+    def run(deployment):
+        terraform.plan(deployment.id, source, deployment.inputs)
+        return terraform.apply(deployment.id, source, deployment.inputs)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        outputs = list(pool.map(run, deployments))
+
+    assert [Path(o["path"]).read_text() for o in outputs] == ["0", "1", "2", "3"]

@@ -1,19 +1,61 @@
 """Thin subprocess wrapper around the Terraform CLI. One throwaway workspace per deployment."""
 
+import contextlib
 import hashlib
 import json
 import re
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
-from app import catalog
+from app import catalog, logs
 from app.settings import settings
 
 
 class TerraformError(Exception):
     pass
+
+
+class _CacheGate:
+    """Reader/writer gate for Terraform's shared provider cache.
+
+    The cache is not safe while a provider is being installed into it: a second `init` corrupts
+    the download, and a `plan`/`apply` in another workspace can read a half-written package
+    ("cached package does not match any of the checksums"). So `init` (the only writer) runs
+    alone, and every other command runs in parallel with its peers. Waiting writers go first so
+    a steady stream of plans cannot starve an init."""
+
+    def __init__(self) -> None:
+        self._changed = threading.Condition()
+        self._readers = 0
+        self._writing = False
+        self._writers_waiting = 0
+
+    @contextlib.contextmanager
+    def held(self, *, exclusive: bool):
+        with self._changed:
+            if exclusive:
+                self._writers_waiting += 1
+                self._changed.wait_for(lambda: not self._writing and self._readers == 0)
+                self._writers_waiting -= 1
+                self._writing = True
+            else:
+                self._changed.wait_for(lambda: not self._writing and not self._writers_waiting)
+                self._readers += 1
+        try:
+            yield
+        finally:
+            with self._changed:
+                if exclusive:
+                    self._writing = False
+                else:
+                    self._readers -= 1
+                self._changed.notify_all()
+
+
+_CACHE = _CacheGate()
 
 
 def deployment_dir(deployment_id: str) -> Path:
@@ -66,19 +108,19 @@ def _first_error(output: str) -> str:
 
 def _run(deployment_id: str, *args: str, subscription_id: str | None = None) -> str:
     workdir = deployment_dir(deployment_id) / "work"
-    result = subprocess.run(
-        [settings.terraform_bin, *args],
-        cwd=workdir,
-        env=_env(subscription_id),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    with _CACHE.held(exclusive=args[0] == "init"):
+        result = subprocess.run(
+            [settings.terraform_bin, *args],
+            cwd=workdir,
+            env=_env(subscription_id),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
     # `output -json` is returned to the caller, not logged: outputs live in the database.
     logged = result.stderr if args[0] == "output" else result.stdout + result.stderr
     shown = " ".join(a for a in args if not a.startswith("-backend-config"))
-    with log_path(deployment_id).open("a") as log:
-        log.write(f"$ terraform {shown}\n{logged}\n")
+    logs.append(deployment_id, f"$ terraform {shown}\n{logged}\n")
     if result.returncode != 0:
         detail = _first_error(result.stderr) or f"exit {result.returncode}"
         raise TerraformError(f"terraform {args[0]} failed: {detail}")
@@ -147,9 +189,7 @@ def destroy(
     deployment_id: str, source: str, variables: dict[str, Any], subscription_id: str | None = None
 ) -> None:
     prepare(deployment_id, source, variables, subscription_id)
-    _run(
-        deployment_id, "destroy", "-no-color", "-auto-approve", subscription_id=subscription_id
-    )
+    _run(deployment_id, "destroy", "-no-color", "-auto-approve", subscription_id=subscription_id)
 
 
 def apply(
@@ -165,9 +205,8 @@ def apply(
     saved, stamp = workdir / "tfplan", workdir / "tfplan.fingerprint"
     expected = _fingerprint(source, variables, subscription_id)
     if not saved.exists() or not stamp.exists() or stamp.read_text() != expected:
-        workdir.mkdir(parents=True, exist_ok=True)  # an empty disk has no deployment folder yet
-        with log_path(deployment_id).open("a") as log:
-            log.write("# no saved plan for this request on this worker; planning here\n")
+        note = "# no saved plan for this request on this worker; planning here\n"
+        logs.append(deployment_id, note)
         plan(deployment_id, source, variables, subscription_id)
     _run(deployment_id, "apply", "-no-color", "tfplan", subscription_id=subscription_id)
     saved.unlink(missing_ok=True)  # a plan is applied once
