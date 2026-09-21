@@ -140,8 +140,11 @@ def test_identity_handed_to_terraform(monkeypatch, tmp_path):
     assert "-backend-config=use_msi=true" not in terraform._backend_args("dep_x")
 
     monkeypatch.setattr(settings, "azure_use_managed_identity", True)
+    monkeypatch.setattr(settings, "azure_managed_identity_client_id", "uami-client")
     hosted = terraform._env()
     assert hosted["ARM_USE_MSI"] == "true"
+    assert hosted["ARM_MSI_ENDPOINT"].startswith("http://127.0.0.1:")
+    assert hosted["ARM_CLIENT_ID"] == "uami-client"
     assert "ARM_CLIENT_CERTIFICATE_PATH" not in hosted  # managed identity wins; no cert handed over
     args = terraform._backend_args("dep_x")
     assert "-backend-config=use_msi=true" in args
@@ -197,3 +200,44 @@ def test_federated_identity_handed_to_terraform(monkeypatch):
     args = terraform._backend_args("dep_x")
     assert "-backend-config=use_oidc=true" in args and "-backend-config=use_msi=true" not in args
     assert not any("mi-token" in a for a in args)  # the token never goes on a command line
+
+
+def test_msi_shim_speaks_the_vm_metadata_protocol(monkeypatch):
+    import json
+    import time
+    import urllib.error
+    import urllib.request
+    from types import SimpleNamespace
+
+    from app import azure_identity, msi_shim
+
+    asked = []
+
+    class FakeCredential:
+        def get_token(self, scope):
+            asked.append(scope)
+            return SimpleNamespace(token="tok-123", expires_on=time.time() + 3600)
+
+    monkeypatch.setattr(azure_identity, "credential", lambda: FakeCredential())
+    url = (
+        msi_shim.endpoint()
+        + "?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F"
+    )
+
+    request = urllib.request.Request(url, headers={"Metadata": "true"})
+    body = json.load(urllib.request.urlopen(request))
+    assert body["access_token"] == "tok-123" and body["token_type"] == "Bearer"
+    assert body["resource"] == "https://management.azure.com/"
+    assert 3500 < int(body["expires_in"]) <= 3600
+    assert asked == ["https://management.azure.com/.default"]
+
+    for bad in (
+        urllib.request.Request(url),
+        urllib.request.Request(url.split("?")[0], headers={"Metadata": "true"}),
+    ):
+        try:
+            urllib.request.urlopen(bad)
+            raise AssertionError("expected 400")
+        except urllib.error.HTTPError as err:
+            assert err.code == 400
+    assert msi_shim.endpoint() + "" == url.split("?")[0]  # started once, stable

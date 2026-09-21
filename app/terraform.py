@@ -43,7 +43,13 @@ def _env() -> dict[str, str]:
         env["ARM_CLIENT_ID"] = settings.azure_federated_client_id
         env["ARM_OIDC_TOKEN"] = federation_token()
     elif settings.azure_use_managed_identity:
-        env["ARM_USE_MSI"] = "true"  # VM-style metadata endpoint only; not Container Apps
+        # Terraform only speaks the VM metadata protocol; serve it locally (see app/msi_shim.py).
+        from app import msi_shim
+
+        env["ARM_USE_MSI"] = "true"
+        env["ARM_MSI_ENDPOINT"] = msi_shim.endpoint()
+        if settings.azure_managed_identity_client_id:
+            env["ARM_CLIENT_ID"] = settings.azure_managed_identity_client_id
     elif settings.azure_client_certificate_path:
         env["ARM_CLIENT_CERTIFICATE_PATH"] = str(settings.azure_client_certificate_path.resolve())
     return env

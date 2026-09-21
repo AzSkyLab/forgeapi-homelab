@@ -62,13 +62,16 @@ class Resolved:
 
 def git_env() -> dict[str, str]:
     """Environment for git (and Terraform's git fetches). The token never touches disk or argv."""
+    from app import github_app
+
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    if settings.github_token:
+    token = github_app.installation_token() if github_app.configured() else settings.github_token
+    if token:
+        host = settings.github_host
         env |= {
             "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": f"url.https://x-access-token:{settings.github_token}@github.com/"
-            ".insteadOf",
-            "GIT_CONFIG_VALUE_0": "https://github.com/",
+            "GIT_CONFIG_KEY_0": f"url.https://x-access-token:{token}@{host}/.insteadOf",
+            "GIT_CONFIG_VALUE_0": f"https://{host}/",
         }
     return env
 

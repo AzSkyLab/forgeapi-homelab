@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     # Read access to private pattern repos. Unset: git uses the host's own credential helper.
     # Local development only; a hosted deployment uses a GitHub App installation token.
     github_token: str | None = None
+    # Better, when the organisation has one: a GitHub App. Tokens are minted per hour.
+    github_app_id: str | None = None
+    github_app_installation_id: str | None = None
+    github_app_private_key: str | None = None  # PEM text, via a Key Vault secret reference
+    github_host: str = "github.com"  # GitHub Enterprise Server: your host
+    github_api_url: str = "https://api.github.com"  # GHES: https://<host>/api/v3
 
     # Identity Terraform runs as (handed over as ARM_* env). The certificate is for local
     # development only; leave it unset once hosted with a managed identity.
