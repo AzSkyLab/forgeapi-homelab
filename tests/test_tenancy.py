@@ -404,6 +404,9 @@ def test_update_and_retry_do_not_count_a_deployment_twice(client):
     for deployment_id in (one, two):
         db.update(deployment_id, State.succeeded, outputs={})
     assert client.put(f"/deployments/{one}", json={}).status_code == 202
+    db.update(one, State.succeeded, outputs={})
+    report = _plan_report(one)
+    assert report["budget"]["this_deployment_now"] == 40.0 and report["budget"]["committed"] == 40.0
     db.update(two, State.failed, error="boom")
     assert client.post(f"/deployments/{two}/retry").status_code == 202
 
@@ -427,3 +430,16 @@ def test_budgets_are_separate_per_business_unit_and_environment(client, monkeypa
     as_groups(monkeypatch, FIN_DEVS, FIN_RELEASE)
     prd = deploy(client, environment="prd", size="large")
     assert prd.status_code == 202 and prd.json()["estimated_monthly_cost"] == 1000.0
+
+
+def _plan_report(deployment_id: str) -> dict:
+    """What the API works out for an update of this deployment, without applying it."""
+    from app import catalog
+    from app.main import _plan_request
+    from app.tenants import Caller
+
+    d = db.get(deployment_id)
+    return _plan_request(
+        Caller("local", frozenset({FIN_DEVS})), d.pattern, catalog.resolve(d.pattern, d.version),
+        d.inputs, d.business_unit, d.environment, d.size, replacing=d.estimated_monthly_cost,
+    )  # fmt: skip

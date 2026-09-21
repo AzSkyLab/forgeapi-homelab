@@ -72,6 +72,9 @@ def check(
         "this_request": cost,
         "available": max(0.0, limit - used),
     }
+    if replacing:
+        # An update: `committed` leaves this deployment out, so say what it costs today.
+        summary = {**summary, "committed": used, "this_deployment_now": replacing}
     if used + cost > limit:
         raise TenancyError(
             403,

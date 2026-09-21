@@ -332,3 +332,21 @@ Engineer requirement: end users must not know where resources go; the platform m
 **Not verified:** budgets on the hosted copy or against the real key-vault pattern's `estimated_costs` (unit-level only so far). **Known limits:** estimates are not bills; concurrent requests can overshoot; no counts, per-pattern caps, expiry or actual-spend reporting.
 
 **Also explained to the engineer, not built:** the single-worker-replica limit (plan and apply are separate activities sharing a local workspace). Recommended fix: make apply re-create its workspace and re-plan (small), and store the saved plan in blob storage once approvals exist.
+
+## 2026-09-20 — Budgets proven on the hosted lab copy
+
+Image `v0.3.0`; lab mapping gave `platform/dev` `budget_monthly: 1.5`; host updated in place (`0 add, 4 change, 0 destroy`). Costs came from the **real** key-vault v1.1.5 `config.yaml` (dev: small 1, medium 5, large 15). Real Entra token.
+
+| Check (hosted API) | Result |
+| --- | --- |
+| `/me` and pattern page | budget 1.5 / committed 0 / available 1.5; cost per size shown |
+| `resource-group` (its repo has no `config.yaml`) | 403: declares no estimated cost. **Finding:** that pattern needs `estimated_costs` before it can be used in any budgeted environment |
+| key-vault `medium`, dry run | 403 with figures (this request 5, available 1.5) |
+| key-vault `small`, dry run | 200, reports cost 1 and budget impact |
+| Real key-vault `small` deployment | 202; budget shows committed 1 **while still in flight**; `succeeded` |
+| Second `small` | 403 (committed 1, request 1, available 0.5) |
+| `PUT {}` on the live deployment | 202 and `succeeded`: its own cost was not counted twice |
+| `PUT {"size":"medium"}` | 403: the +4 does not fit |
+| `DELETE` | budget stayed committed while `destroying`, freed to 0 once `destroyed`; Azure clean; worker and Temporal back to 0 replicas |
+
+Follow-up from the run: an over-budget **update** reported `committed: 0`, which is correct (it excludes the deployment itself) but reads oddly; the response now also carries `this_deployment_now`. Tests: 92 passing.
