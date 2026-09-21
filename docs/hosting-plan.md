@@ -16,7 +16,7 @@ The same layout is a candidate for work, where workers may run on ACA against th
 | Image | GitHub Container Registry (free). ACR Basic is ~$5/month. | **(lab)** public GHCR package, so no pull credential exists at all (this repo is already public and the image holds no secrets); at work, the approved registry with MI pull |
 | Pattern repos | GitHub App installation token. **(lab)** interim: a read-only token in a Key Vault secret, referenced by the apps through their managed identities; the value never enters Terraform state or the API. | read-only on pattern repos |
 
-`up`/`down` scripts set worker and Temporal replicas to 1 or 0. A few hours a week stays inside the free grant (~180k vCPU-s, ~360k GiB-s per month). Always-on worker + Temporal would cost a few dollars a month.
+`scripts/aca.sh up|down|status` starts and stops the worker and Temporal. **`down` deactivates their revisions; lowering min replicas alone does not stop them** (they have no ingress-driven scale rule, so nothing ever scales them in). `status` shows replicas actually running. Re-run `down` after any update of the host deployment, because a new revision starts active. A few hours a week stays inside the free grant (~180k vCPU-s, ~360k GiB-s per month). Always-on worker + Temporal would cost a few dollars a month.
 
 ## Why Table Storage, not Postgres
 
