@@ -431,3 +431,21 @@ Engineer direction: dev-only API (no prd approvals), no CI on the lab repo; decl
 | `uv run pytest` / `ruff` | PASS: 110 / clean. Real Terraform run of a pattern with a sensitive output and two reference outputs: name withheld, references surfaced (top-level and nested), the secret value absent from the record, the response and the log; store round-trip incl. outputs kept across later state changes |
 
 **Not verified:** against a real pattern that creates a vault and a secret (`terraform-pattern-web-backend` does, but it deploys paid resources); not on the hosted copy.
+
+## 2026-09-21 — Outputs and secrets proven end to end on the hosted lab copy
+
+PR #6 merged; image `v0.5.0`. Pattern change (engineer-approved): `AzSkyLab/terraform-azurerm-key-vault` PR #3, tag **v1.2.0**: optional `generated_secret_names` creates random secrets in the pattern's own vault and outputs only versionless references. A read-only `terraform plan` first confirmed that looping over a map with sensitive values works.
+
+| Check (hosted API, real Entra token) | Result |
+| --- | --- |
+| Pattern page | v1.2.0 shows the new input and its description with no API change |
+| Real deployment with two generated secrets, `size: small` | `succeeded`; `outputs.secrets` and `secret_references` hold `https://kv-…vault.azure.net/secrets/database-url` and `…/api-key`; `withheld_outputs: []` because the pattern follows the convention |
+| Reading the secret as the engineer | joined the pattern's `sg-…-secrets-readers` group as its owner, then `az keyvault secret show --id <reference>`: 32 characters. The value was never printed |
+| Does the API ever hold the value? | both real values searched for in 28 KB of API output (deployment, logs, the deployment's events, the unit's events): **0 occurrences** |
+| Cleanup | left the readers group; `DELETE` → `destroyed` (vault, secrets, groups, resource group gone); hosted worker and Temporal stopped, running replicas verified |
+
+**Lab quirk, not a platform property:** the "other business unit" caller in this lab is the same service principal Terraform runs as, which the key-vault module makes Secrets Officer on every vault it creates, so it *can* read these secrets. At work the executor identity and API callers are different principals.
+
+**Non-JSON poll responses:** seen twice more in this run, both within a minute or two of updating the hosted API to a new image. A fully instrumented destroy afterwards gave 29 of 29 polls `200` with JSON, so it did not reproduce. Best guess, unconfirmed: requests landing during the API app's revision switchover (single replica). Status codes are now captured when polling.
+
+**Not verified:** `withheld_outputs` against a real pattern in Azure (only in the local end-to-end test, by design: no real pattern here outputs a sensitive value).
