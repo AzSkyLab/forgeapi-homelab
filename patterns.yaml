@@ -1,0 +1,23 @@
+# Pattern catalog. Each pattern is a runnable Terraform root module (its own provider and
+# backend blocks) in its own git repo; versions are that repo's semver tags.
+#   repo: host/org/name
+#   path: sub-directory of the root module, if not the repo root
+#   default_version: tag used when a request names no version. Omit to follow the newest tag.
+patterns:
+  key-vault:
+    repo: github.com/AzSkyLab/terraform-azurerm-key-vault
+    path: pattern
+  resource-group:
+    repo: github.com/AzSkyLab/terraform-azurerm-resource-group
+    path: pattern
+  # Hosts forgeapi itself on Azure Container Apps. See docs/hosting-plan.md.
+  forgeapi-host:
+    repo: github.com/AzSkyLab/terraform-pattern-forgeapi-host
+
+  # Unversioned local example: no cloud, no credentials.
+  local-file:
+    local: examples/local-file
+
+  # Diagnostic, creates nothing: can Terraform sign in as the worker's identity and write state?
+  azure-identity-check:
+    local: examples/azure-identity-check

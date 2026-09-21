@@ -1,125 +1,48 @@
-name: forgeapi-local
+# `docker compose up --build`, then curl localhost:8000. Ports are loopback-only.
+name: forgeapi
 
 x-app: &app
-  image: forgeapi-local:dev
-  build:
-    context: .
-    target: runtime
-  environment:
-    FORGE_MODE: local-demo
-    AUTH_MODE: entra
-    AUTH_TENANT_ID: ${AUTH_TENANT_ID:?Set the approved tenant ID in .env}
-    AUTH_AUDIENCE: ${AUTH_AUDIENCE:?Set the API application client ID in .env}
-    AUTH_ALLOWED_CLIENT_IDS: ${AUTH_CLIENT_ID:?Set the dedicated public client ID in .env}
-    AUTH_DELEGATED_SCOPE: executions.access
-    AUTH_APPLICATION_ROLE: executions.access
-    AUTH_GRANTS_FILE: /config/grants.local.json
-    CURSOR_SIGNING_KEY: ${CURSOR_SIGNING_KEY:?Generate a separate local cursor key in .env}
-    LOCAL_CONTAINER: "true"
-    LISTEN_ADDR: 0.0.0.0:8080
-    PUBLIC_BASE_URL: http://localhost:8080
-    DATABASE_URL: postgres://forge:local-fixture-only@postgres:5432/forge?sslmode=disable
-    TEMPORAL_ADDRESS: temporal:7233
-    FORGE_OTLP_ENDPOINT: http://collector:4318/v1/traces
-    # No Azure credentials or Terraform binaries enter the API/compute containers.
-    DEPLOYMENT_TARGET_FILE: /config/deployment.local.json
-  networks: [local]
-  read_only: true
-  cap_drop: [ALL]
-  security_opt: [no-new-privileges:true]
-  logging:
-    driver: json-file
-    options: {max-size: "10m", max-file: "2"}
+  image: forgeapi:dev
+  env_file:
+    - path: .env
+      required: false
+  # Read access to private pattern repos, passed at run time and never written to disk:
+  #   FORGEAPI_GITHUB_TOKEN=$(gh auth token) docker compose up --build -d
+  environment: &env
+    FORGEAPI_GITHUB_TOKEN: ${FORGEAPI_GITHUB_TOKEN:-}
+  # Deployment workspaces, Terraform state, logs and the SQLite database. Same directory the
+  # native (non-Docker) run uses, so state survives either way.
+  volumes: &data
+    - ./.local/data:/data
 
 services:
-  collector:
-    image: otel/opentelemetry-collector:0.160.0@sha256:e495787f07dbe432ce763ebaf5bc3d113850e9eee2250ade7a3da6a882d0d69a
-    command: [--config=/etc/otelcol/config.yaml]
-    volumes: ["./config/collector.yaml:/etc/otelcol/config.yaml:ro"]
-    networks: [local]
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    mem_limit: 128m
-    logging:
-      driver: json-file
-      options: {max-size: "10m", max-file: "2"}
-  postgres:
-    image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
-    environment:
-      POSTGRES_USER: forge
-      POSTGRES_PASSWORD: local-fixture-only
-      POSTGRES_DB: forge
-    ports: ["127.0.0.1:54329:5432"]
-    volumes: ["postgres-data:/var/lib/postgresql/data"]
-    networks: [local]
-    healthcheck:
-      test: [CMD-SHELL, "pg_isready -U forge -d forge"]
-      interval: 2s
-      timeout: 2s
-      retries: 30
-
-  temporal-volume-init:
-    image: temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d
-    user: "0:0"
-    entrypoint: [/bin/sh, -c]
-    command: ["chown 1000:1000 /data"]
-    volumes: ["temporal-data:/data"]
-    network_mode: none
-    cap_drop: [ALL]
-    cap_add: [CHOWN]
-    security_opt: [no-new-privileges:true]
-
   temporal:
-    image: temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d
-    command: [server, start-dev, --ip, 0.0.0.0, --db-filename, /data/temporal.db, --ui-port, "8233", --ui-disable-news-fetch]
+    image: temporalio/temporal:1.8.3
+    command: [server, start-dev, --ip, 0.0.0.0, --ui-port, "8233", --ui-disable-news-fetch]
     ports: ["127.0.0.1:7233:7233", "127.0.0.1:8233:8233"]
-    volumes: ["temporal-data:/data"]
-    networks: [local]
-    depends_on:
-      temporal-volume-init: {condition: service_completed_successfully}
     healthcheck:
       test: [CMD, temporal, operator, cluster, health, --address, 127.0.0.1:7233]
       interval: 2s
       timeout: 3s
       retries: 30
 
-  migrate:
-    <<: *app
-    command: [migrate]
-    depends_on:
-      postgres: {condition: service_healthy}
-
   api:
     <<: *app
-    command: [api]
-    ports: ["127.0.0.1:8080:8080"]
-    # Directory mount makes atomic replacement of current grants visible.
-    volumes: ["./config:/config:ro"]
+    build: .  # the only service that builds; the worker reuses the image
+    command: [uvicorn, app.main:app, --host, 0.0.0.0, --port, "8000"]
+    ports: ["127.0.0.1:8000:8000"]
     depends_on:
-      migrate: {condition: service_completed_successfully}
-      collector: {condition: service_started}
-    healthcheck:
-      test: [CMD, /forgeapi, health]
-      interval: 2s
-      timeout: 3s
-      retries: 30
+      temporal: {condition: service_healthy}
 
   worker:
     <<: *app
-    command: [worker]
-    volumes: ["./config:/config:ro"]
+    command: [python, -m, app.worker]
+    environment:
+      <<: *env
+      FORGEAPI_AZURE_CLIENT_CERTIFICATE_PATH: /run/executor/client.pfx
+    # Only the worker sees the Terraform executor certificate (read-only). The API never does.
+    volumes:
+      - ./.local/data:/data
+      - ./.local/executor:/run/executor:ro
     depends_on:
-      migrate: {condition: service_completed_successfully}
       temporal: {condition: service_healthy}
-      collector: {condition: service_started}
-
-volumes:
-  postgres-data:
-  temporal-data:
-
-networks:
-  local:
-    # A normal project bridge permits host port publishing. Every published
-    # port above is explicitly loopback-only; this is not an egress sandbox.
-    driver: bridge

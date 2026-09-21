@@ -1,0 +1,25 @@
+# Business-unit mapping: who may deploy what, where. See docs/tenancy.md.
+# Copy to tenants.yaml, fill in, and set FORGEAPI_TENANTS_PATH=tenants.yaml.
+# Granting a team access to the API = adding their Entra group here.
+business_units:
+  finance:
+    groups:                               # Entra group object IDs; membership = access
+      - 00000000-0000-0000-0000-000000000001
+    inject:                               # supplied to any pattern that declares the variable,
+      business_unit: finance              # and hidden from callers
+      cost_center: "CC-1042"
+    patterns: [key-vault, resource-group] # everything else is invisible to this BU
+    regions:
+      allowed: [eastus2, centralus]
+      default: eastus2                    # beats the pattern's own default
+    environments:
+      dev:
+        subscription_id: 00000000-0000-0000-0000-0000000000aa
+        network:                          # injected the same way as `inject`
+          private_endpoint_subnet_id: /subscriptions/.../subnets/snet-private-endpoints
+      prd:
+        subscription_id: 00000000-0000-0000-0000-0000000000bb
+        groups:                           # if set, BU membership alone is not enough here
+          - 00000000-0000-0000-0000-000000000002
+        network:
+          private_endpoint_subnet_id: /subscriptions/.../subnets/snet-private-endpoints

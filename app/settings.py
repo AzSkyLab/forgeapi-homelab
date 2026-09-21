@@ -1,0 +1,74 @@
+from pathlib import Path
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Environment-driven settings. Every value has a default; nothing is required to start."""
+
+    model_config = SettingsConfigDict(env_prefix="FORGEAPI_", env_file=".env", extra="ignore")
+
+    data_dir: Path = Path(".local/data")
+    catalog_path: Path = Path("patterns.yaml")
+    terraform_bin: str = "terraform"
+
+    temporal_address: str = "localhost:7233"
+    temporal_namespace: str = "default"
+    task_queue: str = "forgeapi"
+
+    # "none": loopback development only. "entra": validate bearer tokens (two values below).
+    # "easyauth": trust the identity header Container Apps / App Service Easy Auth adds; only safe
+    # when Easy Auth is in front, because it strips client-supplied copies of that header.
+    auth_mode: Literal["none", "entra", "easyauth"] = "none"
+    entra_tenant_id: str | None = None
+    entra_audience: str | None = None
+
+    # Business-unit mapping (docs/tenancy.md). Unset: single-tenant, no placement or ownership.
+    tenants_path: Path | None = None
+    # The same mapping as text, for hosts where the file cannot be baked into the image (it is
+    # tenant-specific). Takes precedence over the path. Can come from a Key Vault reference.
+    tenants_yaml: str | None = None
+    dev_groups: str = ""  # comma-separated group IDs the caller has when auth_mode is "none"
+
+    # Where deployment records live. "table" is Azure Table Storage, for hosting.
+    db_backend: Literal["sqlite", "table"] = "sqlite"
+    table_storage_account: str | None = None
+    table_name: str = "deployments"
+    table_connection_string: str | None = None  # Azurite emulator only; real use is Entra auth
+
+    # Read access to private pattern repos. Unset: git uses the host's own credential helper.
+    # Local development only; a hosted deployment uses a GitHub App installation token.
+    github_token: str | None = None
+    # Better, when the organisation has one: a GitHub App. Tokens are minted per hour.
+    github_app_id: str | None = None
+    github_app_installation_id: str | None = None
+    github_app_private_key: str | None = None  # PEM text, via a Key Vault secret reference
+    github_host: str = "github.com"  # GitHub Enterprise Server: your host
+    github_api_url: str = "https://api.github.com"  # GHES: https://<host>/api/v3
+
+    # Identity Terraform runs as (handed over as ARM_* env). The certificate is for local
+    # development only; leave it unset once hosted with a managed identity.
+    azure_tenant_id: str | None = None
+    azure_subscription_id: str | None = None
+    azure_client_id: str | None = None
+    azure_client_certificate_path: Path | None = None
+    # Hosted on Azure: use the app's managed identity for Terraform (provider and state backend)
+    # and for Table Storage. Takes precedence over the certificate.
+    azure_use_managed_identity: bool = False
+    # Client ID of a user-assigned managed identity, when the app has one.
+    azure_managed_identity_client_id: str | None = None
+    # Terraform cannot read a Container Apps managed identity itself (it only knows the VM
+    # metadata address). Instead the worker fetches a managed-identity token and Terraform
+    # presents it as a federated credential for this app registration, which holds the Azure
+    # rights. Still no secret.
+    azure_federated_client_id: str | None = None
+
+    # Remote state for patterns that declare `backend "azurerm" {}`: one blob per deployment,
+    # Entra auth only (no storage keys).
+    state_resource_group: str | None = None
+    state_storage_account: str | None = None
+    state_container: str = "tfstate"
+
+
+settings = Settings()
