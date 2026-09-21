@@ -375,3 +375,15 @@ Also: host pattern **v0.3.1** adds `worker_max_replicas` (scaling the worker by 
 **Operator error worth recording:** a first cleanup attempt did nothing because zsh does not word-split unquoted variables, so one DELETE went to a garbage URL; the non-JSON reply seen in that run came from that. Two earlier non-JSON replies during status polling remain unexplained; status codes are now captured when polling.
 
 **Still true:** patterns that keep local state need a single worker. In-memory Temporal history. Approvals would want the saved plan stored in blob storage so that what was reviewed is what is applied.
+
+## 2026-09-20 — PR #3 merged; "down" did not actually stop the hosted worker and Temporal
+
+PR #3 (`multi-worker`) merged to `main`; branch deleted after a containment check. 97 tests pass on `main`.
+
+**Defect (cost):** asked whether the lab was off, the assistant found the worker (2 replicas) and Temporal (1) still **running** although `scripts/aca.sh down` had set min replicas to 0 each time. Those apps have no ingress-driven scale rule, so Container Apps never scales them in, and every `down`/`up` update also created a new revision with fresh replicas. Earlier "back to 0 replicas" statements in this log checked the **min-replicas setting, not running replicas**, and were wrong: those two apps most likely ran continuously from the first `up` until now (roughly seven hours, about 0.75 vCPU / 1.5 GiB in total). The API app did scale to zero (it has an HTTP scale rule).
+
+**Fix:** `down` now sets min 0 **and deactivates the active revisions**; `up` activates the latest revision and sets min 1 (Temporal first); `status` reports replicas actually running. Verified with a real cycle: `up` → 1 + 1 running, `down` → 0 / 0 / 0 running.
+
+**Cost:** the Cost Management query was rate-limited (429), and usage takes 8–24 h to appear, so the actual figure is unknown. The Container Apps monthly free grant (180,000 vCPU-s, 360,000 GiB-s) likely covers it: ~7 h × 0.75 vCPU ≈ 19,000 vCPU-s and ≈ 38,000 GiB-s. To be checked in the portal tomorrow.
+
+**Everything in the subscription now:** host RG (environment, 3 apps at 0 running replicas, 2 identities: no charge while stopped); `forgeapitestRG01` (state storage account: pennies; three Key Vaults and one unused identity: no standing charge); another project's `rg-cg26091947f163` (FlexConsumption function app with 0 workers, two storage accounts, App Insights) and the default Log Analytics workspace (pay per GB ingested), none created by this work.
