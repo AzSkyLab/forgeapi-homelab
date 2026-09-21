@@ -33,6 +33,10 @@ Reading one: `az keyvault secret show --id <reference> --query value -o tsv`, a 
 4. **Name outputs for what they are:** `*_secret` / a `secrets` map for references, plain names for plain values.
 5. Anything `sensitive` that is *not* a reference will show up in `withheld_outputs`. Treat that as a pattern bug to fix.
 
+## Worked example
+
+`key-vault` v1.2.0 (`AzSkyLab/terraform-azurerm-key-vault`, `pattern/`): input `generated_secret_names: ["database-url", "api-key"]` creates random secrets inside the pattern's vault; output `secrets` holds only the versionless references. Read access follows the pattern's own model: the request's `owners` own the `…-secrets-readers` group and add whoever needs to read.
+
 ## Limits
 
 - Sensitive values still exist in Terraform state (every Terraform setup has this); the state container is readable only by the identity Terraform runs as.
