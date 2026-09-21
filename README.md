@@ -76,6 +76,8 @@ Inputs are checked at the API (422, all problems at once, never echoing the subm
 
 ## Hosting
 
+**Deploying at work (existing ACA environment, MCP server, no local dev):** follow [docs/work-deployment.md](docs/work-deployment.md).
+
 Plan for Azure Container Apps, free when idle: [docs/hosting-plan.md](docs/hosting-plan.md). Built so far: `FORGEAPI_DB_BACKEND=table` (Azure Table Storage, Entra auth) and `FORGEAPI_AZURE_USE_MANAGED_IDENTITY=true` (Terraform provider, state backend and Table Storage use the app's managed identity; no certificate).
 
 ## Auth

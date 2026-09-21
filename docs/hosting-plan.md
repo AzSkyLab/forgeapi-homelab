@@ -41,6 +41,10 @@ One small key-value table, read by ID. The cheapest Postgres Flexible Server is 
 
 Work's Temporal on AKS (persistence, auth, namespaces), private networking/VNet-integrated environment, multi-replica workers, the approved registry and gateway.
 
+## Direct managed identity (added after the federation work)
+
+Federation needs an app registration and a federated credential, which may be hard to obtain at work. `app/msi_shim.py` removes that need: the worker serves the VM metadata token protocol on loopback, backed by the Azure SDK, and Terraform is pointed at it with `ARM_MSI_ENDPOINT`. An attached user-assigned identity is then used directly with its own role assignments. Verified with real Terraform locally and inside Container Apps. Federation still works and wins when `FORGEAPI_AZURE_FEDERATED_CLIENT_ID` is set. The work brief ([work-deployment.md](work-deployment.md)) uses the direct mode.
+
 ## Future option: pattern artifacts instead of GitHub access (not built)
 
 **Problem it solves:** at work nobody on the team may be allowed to create or hold a GitHub credential. Today the worker and API fetch patterns from GitHub at run time, which needs a token (lab: a fine-grained read-only token in Key Vault; usual enterprise answer: a GitHub App owned by the platform team). This option removes GitHub from the runtime entirely, so **no key exists anywhere**.

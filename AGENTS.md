@@ -1,5 +1,6 @@
 # Repository working instructions
 
+- **Deploying in the work environment?** Read `docs/work-deployment.md` first and follow it; do not set up local development there.
 - This branch is the Python/FastAPI rewrite. Start with `docs/rewrite-plan.md` (rules, milestones, parked list) and `docs/progress.md` (what works, next task). `docs/archive-go/` is reference only; do not revive its scope.
 - **Keep it small.** Work on the next milestone only. Do not add anything from the plan's Parked list (retries, cancellation, idempotency, outbox, authz, OTel, Postgres, Docker) unless the engineer asks for it. The engineer builds ahead on the home lab; work-Mac verification is tracked separately in `docs/progress.md`.
 - Local start must need nothing but `uv`: no auth, Azure, Docker or credentials. Auth and Azure are opt-in settings added at their milestones.

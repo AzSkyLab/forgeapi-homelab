@@ -265,3 +265,19 @@ Dry run of the final `forgeapi-host` request (with `entra_audience`) is valid. *
 **Hosting plan status:** every step done and verified except a GitHub App (the lab uses a Key Vault-held read-only token instead). Open question for work: pattern-repo access without anyone holding a key; see the options given to the engineer (GitHub App owned by the platform team, or publishing pattern release artifacts to Azure storage from GitHub Actions via OIDC so the worker never talks to GitHub).
 
 **Live now:** `rg-forgeapi-forgeapi-host-dev` (environment, 3 apps, 2 identities; idle ≈ $0), `stforgeapitf6c68`, `kv-forgeapi-host-38b9`, plus the two old demo vaults and unused UAMI the engineer still has to delete by hand. Certificate for local runs expires 2026-09-27; the token expires in 30 days.
+
+## 2026-09-20 — Work deployment brief; direct managed identity; GitHub App tokens
+
+Engineer decision: skip local dev at work; deploy with the organisation's MCP server into an existing private ACA environment (Easy Auth, Key Vault per app, MCP-built images). Temporal starts on ACA there too (AKS Temporal later). Wants to reuse an existing user-assigned identity (as used by self-hosted runners). Egress is restricted; a GitHub App or machine credential exists; a state storage account exists.
+
+**Built:** `app/msi_shim.py` (loopback VM-metadata token endpoint so Terraform can use an attached managed identity directly; no app registration or federation needed); `app/github_app.py` (hourly installation tokens; GHES host/API settings); `deploy/temporal/Dockerfile`; **`docs/work-deployment.md`** (task brief for Claude at work: rules, inputs, steps, env vars, verification order, troubleshooting from real lab failures, known limits). Image `v0.1.3`. Tests: 71 passing.
+
+| Check | Result |
+| --- | --- |
+| Real Terraform (azurerm provider **and** azurerm backend) through the shim, locally, shim backed by the lab certificate identity | PASS: init, plan, apply, remote state, destroy |
+| Same inside Container Apps, worker in direct managed-identity mode (federation blanked, temporary Reader + state-blob roles on the worker identity) | PASS: `signed_in_object_id` = the worker's **user-assigned identity** `e7144186…`, remote state written, `succeeded` in ~45 s |
+| Cleanup | test deployment destroyed; temporary roles removed (identity back to table + Key Vault only); host `PUT` back to declared config on `v0.1.3` (`0 add, 4 change, 0 destroy`, federation setting restored); worker and Temporal at 0 replicas |
+
+**Not verified:** GitHub App tokens against a real App (unit tests only); anything in the work environment; Easy Auth in front of the API; provider downloads under restricted egress (provider mirror not built); Temporal UI behind Easy Auth.
+
+**Newly documented limit:** the worker must run as exactly one replica, because plan and apply are separate activities sharing a local workspace.
