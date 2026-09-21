@@ -15,6 +15,7 @@ business_units:
     environments:
       dev:
         subscription_id: 00000000-0000-0000-0000-0000000000aa
+        budget_monthly: 500               # estimated monthly cost ceiling; omit for unlimited
         network:                          # injected the same way as `inject`
           private_endpoint_subnet_id: /subscriptions/.../subnets/snet-private-endpoints
       prd:

@@ -1,0 +1,4 @@
+name: local_file
+description: Writes one file inside the deployment workspace. No cloud, no credentials; proves the pipeline.
+category: example
+estimated_costs: 0

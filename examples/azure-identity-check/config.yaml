@@ -1,0 +1,4 @@
+name: azure_identity_check
+description: Creates nothing. Proves Terraform can sign in as the worker's identity and write remote state.
+category: diagnostic
+estimated_costs: 0

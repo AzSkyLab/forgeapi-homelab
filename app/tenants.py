@@ -12,8 +12,8 @@ from app.settings import settings
 
 
 class TenancyError(Exception):
-    def __init__(self, status: int, message: str):
-        super().__init__(message)
+    def __init__(self, status: int, message: Any):
+        super().__init__(str(message))
         self.status, self.message = status, message
 
 
@@ -29,6 +29,7 @@ class Environment:
     subscription_id: str
     groups: frozenset[str] = frozenset()  # if set, BU membership alone is not enough
     network: dict[str, Any] = field(default_factory=dict)
+    budget_monthly: float | None = None  # estimated monthly cost ceiling; None = unlimited
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ def load() -> dict[str, BusinessUnit]:
                     subscription_id=e["subscription_id"],
                     groups=frozenset(e.get("groups") or []),
                     network=dict(e.get("network") or {}),
+                    budget_monthly=e.get("budget_monthly"),
                 )
                 for env, e in (spec.get("environments") or {}).items()
             },

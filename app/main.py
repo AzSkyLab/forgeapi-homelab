@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from temporalio.client import Client
 
-from app import catalog, db, placement, schema, tenants, terraform
+from app import budgets, catalog, db, placement, schema, tenants, terraform
 from app.auth import require_caller
 from app.models import DeploymentCreate, DeploymentOut, DeploymentUpdate, State
 from app.settings import settings
@@ -101,6 +101,10 @@ def me(caller: Caller = Depends(require_caller)):
             {
                 "name": unit.name,
                 "environments": _deployable(caller, unit),
+                "budgets": {
+                    env: budgets.usage(unit, unit.environments[env])
+                    for env in _deployable(caller, unit)
+                },
                 "regions": {"allowed": list(unit.regions_allowed), "default": unit.region_default},
                 "patterns": sorted(unit.patterns & set(catalog.load())),
             }
@@ -156,6 +160,12 @@ def get_pattern(
             "environments": _deployable(caller, unit),
             "sizes": sizes if (config or {}).get("sizing") else None,
         }
+        offered = sizes.get(environment) or [None]
+        shown_for["estimated_monthly_cost"] = {
+            (size or "default"): budgets.estimated_cost(config, environment, size)
+            for size in offered
+        }
+        shown_for["budget"] = budgets.usage(unit, where.environment)
         example_extra = {"environment": environment}
         if shown_for["sizes"] and sizes.get(environment):
             example_extra["size"] = sizes[environment][0]
@@ -204,8 +214,10 @@ def _plan_request(
     business_unit: str | None,
     environment: str | None,
     size: str | None,
+    replacing: float = 0.0,
 ) -> dict:
-    """Validate a request and work out its placement. Returns the record's placement fields."""
+    """Validate a request and work out its placement. Returns the record's placement fields
+    (plus `budget`, for reporting only). `replacing`: this deployment's own current cost."""
     variables = _variables(resolved)
     if not tenants.enabled():
         if business_unit or environment or size:
@@ -216,7 +228,8 @@ def _plan_request(
     else:
         unit = tenants.select_unit(caller, business_unit)
         where = tenants.place(caller, unit, environment, pattern)
-        variables, injected = placement.shape(variables, where, _config(resolved), size)
+        config = _config(resolved)
+        variables, injected = placement.shape(variables, where, config, size)
     problems = schema.errors(pattern, variables, inputs)
     if problems:
         raise HTTPException(422, problems)
@@ -226,7 +239,11 @@ def _plan_request(
     if declares_location and "location" not in inputs and where.unit.region_default:
         # The business unit's default region beats the pattern's own default.
         injected = {**injected, "location": where.unit.region_default}
+    cost = budgets.estimated_cost(config, where.environment.name, size)
+    budget = budgets.check(where.unit, where.environment, pattern, cost, replacing)
     return {
+        "estimated_monthly_cost": cost,
+        "budget": budget,
         "business_unit": where.unit.name,
         "environment": where.environment.name,
         "subscription_id": where.environment.subscription_id,
@@ -259,6 +276,7 @@ async def create_deployment(
             # The subscription is deliberately not shown: callers never need it.
             **{k: v for k, v in placed.items() if k != "subscription_id"},
         }
+    placed.pop("budget", None)
 
     deployment = db.create(
         body.pattern, body.inputs, resolved.version, resolved.commit,
@@ -323,6 +341,7 @@ def _respec(caller: Caller, deployment, version: str | None, inputs: dict, size:
     placed = _plan_request(
         caller, deployment.pattern, resolved, inputs,
         deployment.business_unit, deployment.environment, size,
+        replacing=deployment.estimated_monthly_cost or 0.0,
     )  # fmt: skip
     if placed and placed["subscription_id"] != deployment.subscription_id:
         raise HTTPException(
@@ -331,8 +350,9 @@ def _respec(caller: Caller, deployment, version: str | None, inputs: dict, size:
             "subscription; an existing deployment cannot move",
         )
     db.respec(
-        deployment.id, inputs, resolved.version, resolved.commit, size, placed.get("injected")
-    )
+        deployment.id, inputs, resolved.version, resolved.commit, size,
+        placed.get("injected"), placed.get("estimated_monthly_cost"),
+    )  # fmt: skip
 
 
 @app.post(
