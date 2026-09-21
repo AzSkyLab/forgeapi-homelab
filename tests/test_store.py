@@ -83,12 +83,17 @@ def test_update_keeps_outputs_and_replaces_error(store):
     db.update(deployment_id, State.failed, error="boom")
     assert db.get(deployment_id).error == "boom"
 
-    db.update(deployment_id, State.succeeded, outputs={"uri": "https://x", "list": [1, 2]})
+    db.update(
+        deployment_id, State.succeeded, outputs={"uri": "https://x", "list": [1, 2]},
+        withheld=["admin_password"],
+    )  # fmt: skip
     done = db.get(deployment_id)
+    assert done.withheld_outputs == ["admin_password"]
     assert done.state == State.succeeded and done.error is None
     assert done.outputs == {"uri": "https://x", "list": [1, 2]}
 
     db.update(deployment_id, State.destroying)  # a later state change must not drop outputs
+    assert db.get(deployment_id).withheld_outputs == ["admin_password"]
     assert db.get(deployment_id).outputs == {"uri": "https://x", "list": [1, 2]}
     assert db.get(deployment_id).updated_at > done.created_at
 

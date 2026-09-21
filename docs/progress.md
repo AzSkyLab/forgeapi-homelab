@@ -415,3 +415,19 @@ Image `v0.4.0`; lab mapping gained `auditors:` (the hr group, so the lab service
 | Shutdown | `aca.sh down`, then `status`: worker 0, Temporal 0 running replicas (API returns to 0 on its own after its idle cooldown) |
 
 **Not verified:** the fail-closed path against a real storage outage (unit-tested only); retention/export; immutability at the storage layer (not built).
+
+## 2026-09-21 — Outputs and secrets (branch `outputs-and-secrets`)
+
+Engineer direction: dev-only API (no prd approvals), no CI on the lab repo; declined expiry, provider mirror, keyless patterns, drift and the mapping database for now. Asked how outputs such as a database connection string get back to callers and whether they need storing.
+
+**Finding:** non-sensitive outputs were already stored and retrievable, but outputs marked `sensitive` were **silently dropped**, so a connection string or password would never have reached anyone.
+
+**Decisions:** secrets live in the pattern's own Key Vault; the API returns references only, no reveal endpoint; consumers (apps, pipelines, humans) read the vault with their own identity. Convention and limits: [outputs.md](outputs.md).
+
+**Built:** `withheld_outputs` (names of sensitive outputs, values never stored, returned, logged or audited) and `secret_references` (Key Vault secret IDs found anywhere in the outputs); `links.events` on deployments. Stored in both record stores.
+
+| Check | Result |
+| --- | --- |
+| `uv run pytest` / `ruff` | PASS: 110 / clean. Real Terraform run of a pattern with a sensitive output and two reference outputs: name withheld, references surfaced (top-level and nested), the secret value absent from the record, the response and the log; store round-trip incl. outputs kept across later state changes |
+
+**Not verified:** against a real pattern that creates a vault and a secret (`terraform-pattern-web-backend` does, but it deploys paid resources); not on the hosted copy.

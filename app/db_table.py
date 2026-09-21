@@ -105,6 +105,7 @@ def _to_deployment(e) -> Deployment:
         updated_at=e["updated_at"],
         **{name: e.get(name) or None for name in _PLACEMENT},
         injected=json.loads(e["injected"]) if e.get("injected") else None,
+        withheld_outputs=json.loads(e["withheld_outputs"]) if e.get("withheld_outputs") else None,
         estimated_monthly_cost=None
         if e.get("estimated_monthly_cost") in (None, "")
         else float(e["estimated_monthly_cost"]),
@@ -116,6 +117,7 @@ def update(
     state: State,
     outputs: dict[str, Any] | None,
     error: str | None,
+    withheld: list[str] | None,
     now: datetime,
 ) -> None:
     changes: dict[str, Any] = {
@@ -127,6 +129,7 @@ def update(
     }
     if outputs is not None:  # merge leaves the stored outputs alone otherwise
         changes["outputs"] = json.dumps(outputs)
+        changes["withheld_outputs"] = json.dumps(withheld or [])
     # Same as SQLite: updating a missing record changes nothing.
     with _table() as table, contextlib.suppress(ResourceNotFoundError):
         table.update_entity(changes, mode=UpdateMode.MERGE)
