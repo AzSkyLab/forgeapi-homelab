@@ -50,6 +50,12 @@ variable "tier" {
   default = "none"
 }
 
+variable "api_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
 resource "local_file" "this" {
   filename = "${path.module}/out/result.json"
   content = jsonencode({
@@ -165,7 +171,7 @@ def test_patterns_are_filtered_per_business_unit(client, monkeypatch):
 def test_pattern_page_hides_platform_inputs_and_limits_location(client):
     page = client.get("/patterns/sized").json()
     inputs = {v["name"]: v for v in page["inputs"]}
-    assert set(inputs) == {"name", "location"}  # env, BU, cost centre, subnet and tier are ours
+    assert set(inputs) == {"name", "location", "api_key"}  # the rest is the platform's
     assert inputs["location"]["allowed_values"] == ["eastus2", "centralus"]
     assert inputs["location"]["default"] == "eastus2"
     assert page["placement"] == {
@@ -178,7 +184,7 @@ def test_pattern_page_hides_platform_inputs_and_limits_location(client):
     }
     assert page["example"]["environment"] == "dev" and page["example"]["size"] == "small"
     schema = client.get("/patterns/sized/schema").json()
-    assert set(schema["properties"]) == {"name", "location"}
+    assert set(schema["properties"]) == {"name", "location", "api_key"}
 
 
 def test_deployment_is_placed_and_injected_but_subscription_is_never_shown(client, dispatched):

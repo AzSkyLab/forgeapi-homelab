@@ -1,11 +1,12 @@
 import uuid
+from datetime import datetime
 
 from azure.core.exceptions import AzureError
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from temporalio.client import Client
 
-from app import budgets, catalog, db, logs, placement, schema, tenants
+from app import audit, budgets, catalog, db, logs, placement, schema, tenants
 from app.auth import require_caller
 from app.models import DeploymentCreate, DeploymentOut, DeploymentUpdate, State
 from app.settings import settings
@@ -70,6 +71,51 @@ def _resolve(name: str, version: str | None) -> catalog.Resolved:
         raise HTTPException(422, str(err)) from None
     except catalog.CatalogError as err:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(err)) from None
+
+
+class _Audited:
+    """Records a refusal when the wrapped request is refused; `accepted()` records the go-ahead.
+    The handler fills `ctx` in as it learns more (pattern version, placement, safe inputs)."""
+
+    def __init__(self, action: str, caller: Caller, **ctx):
+        self.action, self.caller, self.ctx = action, caller, {"detail": {}, **ctx}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _type, exc, _tb):
+        if isinstance(exc, (HTTPException, TenancyError)):
+            status_code = exc.status_code if isinstance(exc, HTTPException) else exc.status
+            reason = exc.detail if isinstance(exc, HTTPException) else exc.message
+            detail = {**self.ctx["detail"], "reason": reason}
+            fields = {k: v for k, v in self.ctx.items() if k != "detail"}
+            audit.record_quietly(
+                self.action, "refused", self.caller.id, status=status_code, detail=detail, **fields
+            )
+        return False
+
+    def note(self, **detail) -> None:
+        self.ctx["detail"] |= detail
+
+    def placed(self, deployment) -> None:
+        self.ctx |= {
+            "deployment_id": deployment.id, "pattern": deployment.pattern,
+            "version": deployment.version, "business_unit": deployment.business_unit,
+            "environment": deployment.environment,
+        }  # fmt: skip
+
+    def accepted(self) -> None:
+        """No audit, no action: raises if the event cannot be stored."""
+        fields = {k: v for k, v in self.ctx.items() if k != "detail"}
+        try:
+            audit.record(
+                self.action, "accepted", self.caller.id, detail=self.ctx["detail"], **fields
+            )
+        except Exception:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "the audit trail is unavailable, so the request was not carried out",
+            ) from None
 
 
 def _variables(resolved: catalog.Resolved) -> list[dict]:
@@ -261,11 +307,12 @@ async def create_deployment(
     caller: Caller = Depends(require_caller),
 ):
     """Deploy a pattern. `?dry_run=true` checks the request and creates nothing."""
-    resolved = _resolve(body.pattern, body.version)
-    placed = _plan_request(
-        caller, body.pattern, resolved, body.inputs, body.business_unit, body.environment, body.size
-    )
-    if dry_run:
+    if dry_run:  # changes nothing, so it is not part of the audit trail
+        resolved = _resolve(body.pattern, body.version)
+        placed = _plan_request(
+            caller, body.pattern, resolved, body.inputs,
+            body.business_unit, body.environment, body.size,
+        )  # fmt: skip
         response.status_code = status.HTTP_200_OK
         return {
             "valid": True,
@@ -276,14 +323,44 @@ async def create_deployment(
             # The subscription is deliberately not shown: callers never need it.
             **{k: v for k, v in placed.items() if k != "subscription_id"},
         }
-    placed.pop("budget", None)
 
-    deployment = db.create(
-        body.pattern, body.inputs, resolved.version, resolved.commit,
-        requested_by=caller.id, **placed,
-    )  # fmt: skip
-    await _start(dispatch, deployment, "deploy")
-    return DeploymentOut.of(deployment)
+    with _Audited(
+        "deployment.create", caller, pattern=body.pattern, environment=body.environment,
+        business_unit=body.business_unit or _only_unit(caller),
+    ) as trail:  # fmt: skip
+        trail.note(size=body.size, inputs=audit.safe_inputs(body.inputs, None))
+        resolved = _resolve(body.pattern, body.version)
+        trail.ctx["version"] = resolved.version
+        trail.note(inputs=audit.safe_inputs(body.inputs, _variables(resolved)))
+        placed = _plan_request(
+            caller, body.pattern, resolved, body.inputs,
+            body.business_unit, body.environment, body.size,
+        )  # fmt: skip
+        placed.pop("budget", None)
+        deployment = db.create(
+            body.pattern, body.inputs, resolved.version, resolved.commit,
+            requested_by=caller.id, **placed,
+        )  # fmt: skip
+        trail.placed(deployment)
+        trail.note(
+            commit=resolved.commit, injected=deployment.injected,
+            estimated_monthly_cost=deployment.estimated_monthly_cost,
+        )  # fmt: skip
+        try:
+            trail.accepted()
+        except HTTPException:
+            db.update(deployment.id, State.failed, error="audit trail unavailable; not started")
+            raise
+        await _start(dispatch, deployment, "deploy")
+        return DeploymentOut.of(deployment)
+
+
+def _only_unit(caller: Caller) -> str | None:
+    """The caller's business unit when they have exactly one: lets a refusal be filed under it."""
+    if not tenants.enabled():
+        return None
+    mine = tenants.units_for(caller)
+    return mine[0].name if len(mine) == 1 else None
 
 
 async def _start(dispatch, deployment, action: str) -> None:
@@ -304,12 +381,23 @@ def _load(deployment_id: str, caller: Caller, *, change: bool = False):
         raise HTTPException(404, "deployment not found")
     if not tenants.enabled():
         return deployment
+
+    def denied(code: int) -> None:
+        # Filed under the owning business unit, so they can see who tried.
+        audit.record_quietly(
+            "deployment.access", "refused", caller.id, status=code, deployment_id=deployment.id,
+            pattern=deployment.pattern, business_unit=deployment.business_unit,
+            environment=deployment.environment, detail={"wanted_to_change": change},
+        )  # fmt: skip
+
     unit = tenants.load().get(deployment.business_unit or "")
     if unit is None or not unit.includes(caller):
+        denied(404)
         raise HTTPException(404, "deployment not found")
     if change:
         env = unit.environments.get(deployment.environment or "")
         if env is None or not unit.can_deploy(caller, env):
+            denied(403)
             raise HTTPException(
                 403, f"you may not change deployments in {unit.name}/{deployment.environment}"
             )
@@ -334,8 +422,12 @@ def get_logs(deployment_id: str, caller: Caller = Depends(require_caller)):
     return logs.read(deployment_id)
 
 
-def _respec(caller: Caller, deployment, version: str | None, inputs: dict, size: str | None):
-    """Re-validate against the current pattern version and the current mapping, then store."""
+def _respec(
+    caller: Caller, deployment, version: str | None, inputs: dict, size: str | None,
+    *, dry: bool = False,
+):  # fmt: skip
+    """Re-validate against the current pattern version and the current mapping, then store
+    (unless `dry`, which only validates)."""
     resolved = _resolve(deployment.pattern, version)
     placed = _plan_request(
         caller, deployment.pattern, resolved, inputs,
@@ -348,6 +440,8 @@ def _respec(caller: Caller, deployment, version: str | None, inputs: dict, size:
             f"{deployment.business_unit}/{deployment.environment} now maps to a different "
             "subscription; an existing deployment cannot move",
         )
+    if dry:
+        return
     db.respec(
         deployment.id, inputs, resolved.version, resolved.commit, size,
         placed.get("injected"), placed.get("estimated_monthly_cost"),
@@ -367,14 +461,18 @@ async def retry_deployment(
     """Re-run plan and apply for a failed deployment: same pattern commit, inputs and state, so
     Terraform finishes what is missing instead of starting over."""
     deployment = _load(deployment_id, caller, change=True)
-    if deployment.state != State.failed:
-        detail = f"only a failed deployment can be retried; this one is {deployment.state}"
-        raise HTTPException(409, detail)
-    if tenants.enabled():  # pick up corrections to the mapping (subnet, cost centre, ...)
-        _respec(caller, deployment, deployment.version, deployment.inputs, deployment.size)
-    db.update(deployment_id, State.accepted)
-    await _start(dispatch, deployment, "deploy")
-    return DeploymentOut.of(_load(deployment_id, caller))
+    with _Audited("deployment.retry", caller) as trail:
+        trail.placed(deployment)
+        if deployment.state != State.failed:
+            detail = f"only a failed deployment can be retried; this one is {deployment.state}"
+            raise HTTPException(409, detail)
+        if tenants.enabled():  # pick up corrections to the mapping (subnet, cost centre, ...)
+            _respec(caller, deployment, deployment.version, deployment.inputs, deployment.size)
+        trail.note(injected=db.get(deployment_id).injected)
+        trail.accepted()
+        db.update(deployment_id, State.accepted)
+        await _start(dispatch, deployment, "deploy")
+        return DeploymentOut.of(_load(deployment_id, caller))
 
 
 @app.put(
@@ -392,14 +490,26 @@ async def update_deployment(
     its existing state. `inputs` replaces the whole set; omit it to keep the current inputs. Omit
     `version` or `size` to keep the current one. Business unit and environment never change."""
     deployment = _load(deployment_id, caller, change=True)
-    if deployment.state not in (State.succeeded, State.failed):
-        raise HTTPException(409, f"cannot update a deployment that is {deployment.state}")
-    inputs = deployment.inputs if body.inputs is None else body.inputs
-    _respec(caller, deployment, body.version or deployment.version, inputs,
-            body.size or deployment.size)  # fmt: skip
-    db.update(deployment_id, State.accepted)
-    await _start(dispatch, deployment, "deploy")
-    return DeploymentOut.of(_load(deployment_id, caller))
+    with _Audited("deployment.update", caller) as trail:
+        trail.placed(deployment)
+        inputs = deployment.inputs if body.inputs is None else body.inputs
+        version, size = body.version or deployment.version, body.size or deployment.size
+        trail.note(
+            from_version=deployment.version, to_version=version,
+            from_size=deployment.size, to_size=size, inputs_changed=inputs != deployment.inputs,
+            inputs=audit.safe_inputs(inputs, None),
+        )  # fmt: skip
+        if deployment.state not in (State.succeeded, State.failed):
+            raise HTTPException(409, f"cannot update a deployment that is {deployment.state}")
+        resolved = _resolve(deployment.pattern, version)
+        trail.note(inputs=audit.safe_inputs(inputs, _variables(resolved)))
+        # Record the go-ahead before anything changes; _respec validates and may still refuse.
+        _respec(caller, deployment, version, inputs, size, dry=True)
+        trail.accepted()
+        _respec(caller, deployment, version, inputs, size)
+        db.update(deployment_id, State.accepted)
+        await _start(dispatch, deployment, "deploy")
+        return DeploymentOut.of(_load(deployment_id, caller))
 
 
 @app.delete(
@@ -414,8 +524,36 @@ async def destroy_deployment(
 ):
     """`terraform destroy` everything the deployment's state records. The record itself is kept."""
     deployment = _load(deployment_id, caller, change=True)
-    if deployment.state not in (State.succeeded, State.failed):
-        raise HTTPException(409, f"cannot destroy a deployment that is {deployment.state}")
-    db.update(deployment_id, State.destroying)
-    await _start(dispatch, deployment, "destroy")
-    return DeploymentOut.of(_load(deployment_id, caller))
+    with _Audited("deployment.destroy", caller) as trail:
+        trail.placed(deployment)
+        if deployment.state not in (State.succeeded, State.failed):
+            raise HTTPException(409, f"cannot destroy a deployment that is {deployment.state}")
+        trail.accepted()
+        db.update(deployment_id, State.destroying)
+        await _start(dispatch, deployment, "destroy")
+        return DeploymentOut.of(_load(deployment_id, caller))
+
+
+@app.get("/deployments/{deployment_id}/events", response_model=list[audit.Event])
+def deployment_events(deployment_id: str, caller: Caller = Depends(require_caller)):
+    """The audit trail of one deployment, newest first."""
+    deployment = _load(deployment_id, caller)
+    return audit.for_deployment(deployment_id, deployment.business_unit)
+
+
+@app.get("/events", response_model=list[audit.Event])
+def events(
+    business_unit: str | None = None,
+    since: datetime | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    caller: Caller = Depends(require_caller),
+):
+    """Audit events, newest first: your business units', or every unit's for auditors."""
+    if not tenants.enabled():
+        return audit.query(None, since, limit)
+    if tenants.is_auditor(caller):
+        return audit.query([business_unit] if business_unit else None, since, limit)
+    mine = [unit.name for unit in tenants.units_for(caller)]
+    if business_unit is not None and business_unit not in mine:
+        raise HTTPException(403, f"you are not a member of business unit {business_unit!r}")
+    return audit.query([business_unit] if business_unit else mine, since, limit)

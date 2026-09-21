@@ -1,6 +1,11 @@
 # Business-unit mapping: who may deploy what, where. See docs/tenancy.md.
 # Copy to tenants.yaml, fill in, and set FORGEAPI_TENANTS_PATH=tenants.yaml.
 # Granting a team access to the API = adding their Entra group here.
+# Optional: Entra groups whose members may read every business unit's audit events (docs/audit.md).
+# It grants nothing else.
+auditors:
+  - 00000000-0000-0000-0000-0000000000ff
+
 business_units:
   finance:
     groups:                               # Entra group object IDs; membership = access

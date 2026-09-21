@@ -65,4 +65,4 @@ Limits: estimates are not bills; two simultaneous requests can both pass the che
 
 ## Not in scope yet
 
-Per-pattern version limits per BU; deployment counts, per-pattern caps and expiry; actual-spend reporting; approval steps for prd; an admin API for the mapping; audit log beyond the deployment record.
+Per-pattern version limits per BU; deployment counts, per-pattern caps and expiry; actual-spend reporting; approval steps for prd; an admin API for the mapping. (The audit trail now exists: [audit.md](audit.md).)
