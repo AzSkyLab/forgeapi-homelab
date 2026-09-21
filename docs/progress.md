@@ -449,3 +449,13 @@ PR #6 merged; image `v0.5.0`. Pattern change (engineer-approved): `AzSkyLab/terr
 **Non-JSON poll responses:** seen twice more in this run, both within a minute or two of updating the hosted API to a new image. A fully instrumented destroy afterwards gave 29 of 29 polls `200` with JSON, so it did not reproduce. Best guess, unconfirmed: requests landing during the API app's revision switchover (single replica). Status codes are now captured when polling.
 
 **Not verified:** `withheld_outputs` against a real pattern in Azure (only in the local end-to-end test, by design: no real pattern here outputs a sensitive value).
+
+## 2026-09-21 — Work deployment brief brought up to date, and tied to the code
+
+The engineer asked whether the work brief had been maintained. It had been updated for business units, Easy Auth and multi-replica workers, but **not** for budgets, the audit trail, outputs and secrets, the three storage tables, delivering the mapping as configuration, the dev-only scope, or the current image; it still said 97 tests and implied one subscription per worker.
+
+**Done:** `docs/work-deployment.md` rewritten against `main` (image `v0.5.0`): "current as of" line; how a request flows now; platform vs target subscriptions; mapping delivered by `FORGEAPI_TENANTS_YAML` (Key Vault reference) on the API app only, with a warning that an unconfigured mapping means no placement, ownership or budgets; verification now checks `/me` budgets, non-empty logs, audit events, hidden platform inputs, injected tags and secret references; ten new troubleshooting rows from real lab failures; updated known limits (identity choice and secret reach, audit storage, stopping apps); and a **pattern repo checklist**, since sizes, costs, injection and secret handling live in the pattern repos.
+
+**Guard against drift:** `tests/test_docs.py` fails if the brief names a setting that does not exist, omits a setting that does, or omits an endpoint. `AGENTS.md` now requires the brief to be updated in the same PR as any change that affects deployment. Tests: 113 passing.
+
+**Not verified:** the brief has never been executed; nothing has been deployed in the work environment.
