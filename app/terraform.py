@@ -1,5 +1,6 @@
 """Thin subprocess wrapper around the Terraform CLI. One throwaway workspace per deployment."""
 
+import hashlib
 import json
 import re
 import shutil
@@ -127,21 +128,49 @@ def prepare(
     _run(deployment_id, "init", "-no-color", *backend, subscription_id=subscription_id)
 
 
+def _fingerprint(source: str, variables: dict[str, Any], subscription_id: str | None) -> str:
+    """Identifies exactly what a saved plan was made from."""
+    material = json.dumps([source, variables, subscription_id], sort_keys=True)
+    return hashlib.sha256(material.encode()).hexdigest()
+
+
 def plan(
     deployment_id: str, source: str, variables: dict[str, Any], subscription_id: str | None = None
 ) -> None:
     prepare(deployment_id, source, variables, subscription_id)
     _run(deployment_id, "plan", "-no-color", "-out=tfplan", subscription_id=subscription_id)
+    stamp = deployment_dir(deployment_id) / "work" / "tfplan.fingerprint"
+    stamp.write_text(_fingerprint(source, variables, subscription_id))
 
 
 def destroy(
     deployment_id: str, source: str, variables: dict[str, Any], subscription_id: str | None = None
 ) -> None:
     prepare(deployment_id, source, variables, subscription_id)
-    _run(deployment_id, "destroy", "-no-color", "-auto-approve", subscription_id=subscription_id)
+    _run(
+        deployment_id, "destroy", "-no-color", "-auto-approve", subscription_id=subscription_id
+    )
 
 
-def apply(deployment_id: str, subscription_id: str | None = None) -> dict[str, Any]:
+def apply(
+    deployment_id: str, source: str, variables: dict[str, Any], subscription_id: str | None = None
+) -> dict[str, Any]:
+    """Apply the saved plan for exactly this request.
+
+    Plan and apply are separate steps and may run on different worker replicas, each with its
+    own disk. If this replica does not hold a plan made from this source, these variables and
+    this subscription (another replica planned it, or a plan from an earlier request is lying
+    around), it rebuilds the workspace and plans again. Remote state makes that safe."""
+    workdir = deployment_dir(deployment_id) / "work"
+    saved, stamp = workdir / "tfplan", workdir / "tfplan.fingerprint"
+    expected = _fingerprint(source, variables, subscription_id)
+    if not saved.exists() or not stamp.exists() or stamp.read_text() != expected:
+        workdir.mkdir(parents=True, exist_ok=True)  # an empty disk has no deployment folder yet
+        with log_path(deployment_id).open("a") as log:
+            log.write("# no saved plan for this request on this worker; planning here\n")
+        plan(deployment_id, source, variables, subscription_id)
     _run(deployment_id, "apply", "-no-color", "tfplan", subscription_id=subscription_id)
+    saved.unlink(missing_ok=True)  # a plan is applied once
+    stamp.unlink(missing_ok=True)
     raw = json.loads(_run(deployment_id, "output", "-json", subscription_id=subscription_id))
     return {name: o["value"] for name, o in raw.items() if not o.get("sensitive")}
