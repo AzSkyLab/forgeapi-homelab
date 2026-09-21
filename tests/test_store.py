@@ -141,3 +141,19 @@ def test_placement_fields_round_trip_and_listing_is_scoped(store):
     )
     assert changed.business_unit == "finance" and changed.subscription_id == "sub-1"
     assert changed.estimated_monthly_cost == 99
+
+
+def test_logs_are_readable_from_the_shared_store(store, monkeypatch, tmp_path):
+    from app import logs, terraform
+
+    logs.append("dep_logs", "$ terraform plan\nfirst\n")
+    logs.append("dep_logs", "x" * 70_000 + "\nlast\n")  # larger than one table property
+    logs.append("dep_other", "someone else's\n")
+
+    if store == "table":  # a different container: no local file, only the shared store
+        monkeypatch.setattr(terraform, "deployment_dir", lambda d: tmp_path / "another-disk" / d)
+    text = logs.read("dep_logs")
+    assert text.startswith("$ terraform plan\nfirst\n") and text.endswith("\nlast\n")
+    assert len(text) == len("$ terraform plan\nfirst\n") + 70_000 + len("\nlast\n")
+    assert "someone else's" not in text
+    assert logs.read("dep_none") == ""

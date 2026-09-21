@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from temporalio.client import Client
 
-from app import budgets, catalog, db, placement, schema, tenants, terraform
+from app import budgets, catalog, db, logs, placement, schema, tenants
 from app.auth import require_caller
 from app.models import DeploymentCreate, DeploymentOut, DeploymentUpdate, State
 from app.settings import settings
@@ -331,8 +331,7 @@ def get_deployment(deployment_id: str, caller: Caller = Depends(require_caller))
 @app.get("/deployments/{deployment_id}/logs", response_class=PlainTextResponse)
 def get_logs(deployment_id: str, caller: Caller = Depends(require_caller)):
     _load(deployment_id, caller)
-    path = terraform.log_path(deployment_id)
-    return path.read_text() if path.exists() else ""
+    return logs.read(deployment_id)
 
 
 def _respec(caller: Caller, deployment, version: str | None, inputs: dict, size: str | None):

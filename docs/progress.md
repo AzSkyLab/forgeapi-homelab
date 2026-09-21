@@ -350,3 +350,28 @@ Image `v0.3.0`; lab mapping gave `platform/dev` `budget_monthly: 1.5`; host upda
 | `DELETE` | budget stayed committed while `destroying`, freed to 0 once `destroyed`; Azure clean; worker and Temporal back to 0 replicas |
 
 Follow-up from the run: an over-budget **update** reported `committed: 0`, which is correct (it excludes the deployment itself) but reads oddly; the response now also carries `this_deployment_now`. Tests: 92 passing.
+
+## 2026-09-20 — Multi-replica workers, concurrency, hosted logs (branch `multi-worker`)
+
+PR #2 (budgets) merged to `main`; this branch starts from there.
+
+**Goal:** remove the single-worker-replica limit. **Fix:** `terraform.apply` checks for a saved plan made from exactly this source, variables and subscription (a fingerprint written at plan time); if this replica does not hold one, it rebuilds the workspace and re-plans. A saved plan is deleted once applied. This also closed a single-worker hazard: a plan left by a request that never reached apply could have been applied to a later request.
+
+**Two further defects found by proving it on the hosted copy with two replicas and eight simultaneous deployments:**
+
+1. **Terraform's shared provider cache is not safe under concurrency.** First run: 4 of 8 failed (`cached package … does not match`, `text file busy`). One deployment's `init` wrote the cache while another's `plan` executed the same provider. It affects a single worker too; every earlier test ran deployments one at a time. Fix: a reader/writer gate, `init` alone, everything else parallel, writers first. A local test with a cold cache and four parallel deployments failed most runs before and passed 12 of 12 after. (A first attempt at this fix silently did not apply because a text replacement did not match; the test caught it.)
+2. **`GET /deployments/{id}/logs` was always empty when hosted**: the API read its own disk while the worker, a different container, wrote the file. The earlier hosted "no token in the logs" checks were therefore vacuous. Fix: `app/logs.py` also writes chunks to a second table (`<table>logs`) in the same storage account, and the API reads from the store.
+
+Also: host pattern **v0.3.1** adds `worker_max_replicas` (scaling the worker by hand to 2 had made the next apply fail with `ContainerAppInvalidScaleSpec`, because Terraform pinned max 1 while ignoring min); `scripts/aca.sh` now changes only the minimum. Images `v0.3.1`, `v0.3.2`.
+
+| Check | Result |
+| --- | --- |
+| `uv run pytest` / `ruff` | PASS: 97 / clean. New: apply on a replica that did not plan; stale plan never applied; cold-cache concurrency; logs in both stores incl. a 70 KB write |
+| Hosted, 2 replicas, image v0.3.1 (before the cache and log fixes) | 4 of 8 failed; logs empty |
+| Hosted, 2 fresh replicas (cold caches), image v0.3.2, 8 simultaneous deployments | **8 of 8 succeeded; 4 of 8 had plan and apply on different replicas** and re-planned on the applying one |
+| Logs through the hosted API | present (71–131 lines each); scanned 8 real logs for tokens/keys: none |
+| Cleanup: 16 destroys at once across 2 replicas | 15 × 202, 1 × 409 (already destroyed); all `destroyed`; budget back to 0; worker and Temporal at 0 replicas |
+
+**Operator error worth recording:** a first cleanup attempt did nothing because zsh does not word-split unquoted variables, so one DELETE went to a garbage URL; the non-JSON reply seen in that run came from that. Two earlier non-JSON replies during status polling remain unexplained; status codes are now captured when polling.
+
+**Still true:** patterns that keep local state need a single worker. In-memory Temporal history. Approvals would want the saved plan stored in blob storage so that what was reviewed is what is applied.

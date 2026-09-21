@@ -241,3 +241,59 @@ def test_msi_shim_speaks_the_vm_metadata_protocol(monkeypatch):
         except urllib.error.HTTPError as err:
             assert err.code == 400
     assert msi_shim.endpoint() + "" == url.split("?")[0]  # started once, stable
+
+
+def test_apply_on_a_worker_that_did_not_plan(tmp_path, monkeypatch):
+    """Two replicas share the record store but not a disk. A plans; B, empty, applies."""
+    from app import activities
+
+    deployment = _accept("demo", {"filename": "b.txt", "content": "made on replica B"})
+    source = catalog.resolve("demo", None).terraform_source
+
+    monkeypatch.setattr(terraform, "deployment_dir", lambda d: tmp_path / "replica-a" / d)
+    terraform.plan(deployment.id, source, deployment.inputs)
+    assert (tmp_path / "replica-a" / deployment.id / "work" / "tfplan").exists()
+
+    monkeypatch.setattr(terraform, "deployment_dir", lambda d: tmp_path / "replica-b" / d)
+    activities.apply(deployment.id)
+
+    result = db.get(deployment.id)
+    assert result.state == State.succeeded
+    written = Path(result.outputs["path"])
+    assert written.read_text() == "made on replica B"
+    assert written.is_relative_to(tmp_path / "replica-b")
+    assert "planning here" in terraform.log_path(deployment.id).read_text()
+
+
+def test_a_plan_left_over_from_an_earlier_request_is_never_applied():
+    from app import activities
+
+    deployment = _accept("demo", {"filename": "s.txt", "content": "old request"})
+    activities.plan(deployment.id)  # planned, never applied (say the worker died)
+
+    db.respec(deployment.id, {"filename": "s.txt", "content": "new request"}, deployment.version,
+              deployment.commit)  # fmt: skip
+    activities.apply(deployment.id)  # must not apply the stale "old request" plan
+
+    assert Path(db.get(deployment.id).outputs["path"]).read_text() == "new request"
+    workdir = terraform.deployment_dir(deployment.id) / "work"
+    assert not (workdir / "tfplan").exists()  # a plan is applied once, then removed
+
+
+def test_concurrent_first_time_deployments_share_a_cold_provider_cache():
+    """Regression: parallel `terraform init`s downloading into the shared plugin cache corrupted
+    it on the hosted worker. Inits are serialised per worker; everything else stays parallel."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    source = catalog.resolve("demo", None).terraform_source
+    deployments = [_accept("demo", {"filename": f"{n}.txt", "content": str(n)}) for n in range(4)]
+    assert not (settings.data_dir / "plugin-cache").exists()  # cold
+
+    def run(deployment):
+        terraform.plan(deployment.id, source, deployment.inputs)
+        return terraform.apply(deployment.id, source, deployment.inputs)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        outputs = list(pool.map(run, deployments))
+
+    assert [Path(o["path"]).read_text() for o in outputs] == ["0", "1", "2", "3"]

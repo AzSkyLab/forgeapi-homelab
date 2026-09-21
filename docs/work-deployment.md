@@ -8,7 +8,7 @@ You are deploying **forgeapi** into an existing, private Azure Container Apps en
 - **Read before you write.** Do the checks in [Step 0](#step-0-discover-and-verify-read-only) before creating anything.
 - **Never print, log or paste secrets** (private keys, tokens). Reference them by Key Vault secret name only.
 - **Stop and ask the engineer** before: creating or changing role assignments, touching anything outside the three apps named here, deploying any real pattern (anything except `local-file` and `azure-identity-check`), or when a verification step fails twice.
-- Do not run `uv`, tests or local Docker. Local development is deliberately skipped at work; the code is already tested (86 tests in the lab).
+- Do not run `uv`, tests or local Docker. Local development is deliberately skipped at work; the code is already tested (97 tests in the lab).
 - Report at the end using the [report format](#report-format). State plainly what was verified and what was not.
 
 ## What you are deploying
@@ -18,12 +18,12 @@ One repository, two images, three container apps in the existing environment:
 | App | Image | Start command | Ingress | Replicas | Identity |
 | --- | --- | --- | --- | --- | --- |
 | `forgeapi-temporal` | built from `deploy/temporal/Dockerfile` | (image entrypoint) | **internal TCP 7233** | min 1, max 1 | none |
-| `forgeapi-worker` | built from the repo root `Dockerfile` | `python -m app.worker` | **none** | **min 1, max 1** | the user-assigned identity (below) |
+| `forgeapi-worker` | built from the repo root `Dockerfile` | `python -m app.worker` | **none** | min 1, max 1 to start (see below) | the user-assigned identity (below) |
 | `forgeapi-api` | same image as the worker | `uvicorn app.main:app --host 0.0.0.0 --port 8000` | HTTP 8000, private endpoint, Easy Auth (as the MCP server sets up) | min 1 (or 0), max 2 | the same user-assigned identity, or one with only table access |
 
 How it works: the API validates a request, writes a record to Azure Table Storage and starts a Temporal workflow. The worker picks it up, fetches the Terraform pattern from its git repo at a pinned commit, and runs `terraform plan`/`apply` with state in a blob container. Temporal starts on ACA for now; an AKS-hosted Temporal exists and can replace it later by changing one setting.
 
-**The worker must stay at exactly one replica.** Plan and apply are separate steps that share a workspace on the replica's local disk; a second replica breaks deployments ("missing provider plugins" / missing plan file).
+**Worker replicas.** Start with one. More than one is supported from image v0.3.2: plan and apply are separate steps and may land on different replicas, so apply verifies it holds the plan for exactly this request and otherwise rebuilds the workspace and re-plans (proven with two replicas: 8 of 8 deployments succeeded, 4 of them split across replicas). This relies on remote state, so it does **not** hold for patterns that keep local state (only the built-in `local-file` example). Never point two *different* worker deployments (for example a laptop and the hosted one) at the same Temporal queue.
 
 ## Inputs the engineer must give you
 
@@ -92,7 +92,7 @@ History is in memory: restarting this app forgets workflow history. Deployment r
 
 ## Step 4: deploy the worker
 
-`forgeapi-worker`: app image, command `python -m app.worker`, **no ingress**, min 1 / max 1, user-assigned identity attached. CPU 0.5 / memory 1Gi is enough.
+`forgeapi-worker`: app image, command `python -m app.worker`, **no ingress**, min 1 / max 1 to begin with, user-assigned identity attached. CPU 0.5 / memory 1Gi is enough.
 
 Environment (worker **and** API get all of these; differences noted):
 
@@ -163,7 +163,8 @@ Every entry below actually happened in the lab.
 | `503 deployment records are temporarily unavailable`, or `AuthorizationPermissionMismatch` in API logs | Table role missing or granted under ~2 minutes ago | confirm the role; wait; retry |
 | `ManagedIdentityAuthorizer … 169.254.169.254 … connection refused` | `FORGEAPI_AZURE_USE_MANAGED_IDENTITY` not `true`, or an image older than v0.1.3 | fix the env var / rebuild |
 | `signed_in_object_id` is not the identity's principal ID | a federated or certificate setting is present | remove the "do not set" variables |
-| `missing or corrupted provider plugins`, or plan file not found at apply | more than one worker replica (or a second worker on the same Temporal queue) | max replicas 1; one worker per Temporal |
+| `missing or corrupted provider plugins`, `cached package … does not match`, `text file busy` | an image older than v0.3.2 (parallel deployments corrupted Terraform's shared provider cache, even on one replica), or two different worker deployments on one Temporal queue | use v0.3.2+; one worker deployment per Temporal |
+| `GET …/logs` is empty although the deployment ran | an image older than v0.3.2 (logs stayed on the worker's disk) | use v0.3.2+; logs are stored in the `deploymentslogs` table |
 | `502` on `GET /patterns/{name}` or at POST | cannot reach/authenticate to GitHub | check egress, App installation covers the repo **and every module repo it references**, secret reference resolves |
 | Container app revision fails: `Unable to get value using Managed identity … for secret` | identity lacks `Key Vault Secrets User`, or the role is too new | grant/wait, then redeploy the revision |
 | `503 job engine unavailable` on POST | API cannot reach Temporal | Temporal app running? TCP ingress 7233 internal? address is `<app-name>:7233` |
@@ -173,7 +174,7 @@ Every entry below actually happened in the lab.
 
 ## Known limits to tell the engineer about
 
-- One worker replica, one target subscription per worker, in-memory Temporal history.
+- In-memory Temporal history. Patterns that keep local state need a single worker replica.
 - Authorization is by business unit and environment (Entra groups). There are no quotas, approvals or per-pattern-version limits yet. Reusing a GitHub-runner identity means API callers inherit that identity's reach. A dedicated identity with narrower rights is the better long-term choice.
 - GitHub App token support is unit-tested only; it has not been run against a real App. A machine token through a Key Vault reference **has** been proven end to end.
 - The Terraform provider mirror for fully closed egress is not built.

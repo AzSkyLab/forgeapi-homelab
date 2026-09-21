@@ -20,19 +20,21 @@ _ensured: set[str] = set()  # tables this process has already made sure exist
 
 
 def _table() -> TableClient:
+    return table(settings.table_name)
+
+
+def table(name: str) -> TableClient:
     if settings.table_connection_string:  # the Azurite emulator, tests only
-        client = TableClient.from_connection_string(
-            settings.table_connection_string, settings.table_name
-        )
+        client = TableClient.from_connection_string(settings.table_connection_string, name)
     else:
         from app.azure_identity import credential
 
         client = TableClient(
             endpoint=f"https://{settings.table_storage_account}.table.core.windows.net",
-            table_name=settings.table_name,
+            table_name=name,
             credential=credential(),
         )
-    key = f"{client.url}/{settings.table_name}"
+    key = f"{client.url}/{name}"
     if key not in _ensured:
         with contextlib.suppress(ResourceExistsError):
             client.create_table()
