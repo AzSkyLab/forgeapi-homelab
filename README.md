@@ -15,15 +15,9 @@ docker compose down               # stop; data in .local/data is kept
 
 Then use the curl commands below. Run either this Docker stack or the native one, never both at once: two workers on one queue with different filesystem views break Terraform's provider cache. Only the worker container gets the Terraform certificate (`.local/executor`, read-only); the API container does not. Temporal history is in-memory and resets on `down`; deployments and Terraform state do not.
 
-## One container
+## Two apps
 
-The image's default command runs everything (Temporal dev server, worker, API) in one container, for platforms that deploy one image as one web app:
-
-```sh
-docker build -t forgeapi . && docker run --rm -p 8000:8000 -e FORGEAPI_DATA_DIR=/tmp/forgeapi forgeapi
-```
-
-If any of the three processes stops, the container exits so the platform restarts it. A deployment interrupted that way is marked `interrupted` and can be retried; the dead run's Terraform state lock is released automatically.
+For platforms that deploy one image as one HTTP app: the root `Dockerfile` is the **API** app and `deploy/engine/Dockerfile` is the **engine** app (Temporal dev server, Temporal web UI on the HTTP port, and the worker). The API points `FORGEAPI_TEMPORAL_ADDRESS` at the engine's port 7233. If any engine process stops, the container exits so the platform restarts it; a deployment interrupted that way is marked `interrupted` and can be retried, and the dead run's Terraform state lock is released automatically. Deployment guide: [docs/work-deployment.md](docs/work-deployment.md).
 
 ## Run natively
 
@@ -119,6 +113,6 @@ app/audit.py       append-only audit events
 app/db.py          records: SQLite or Table         app/terraform.py   CLI wrapper, cache gate
 app/logs.py        logs: file or Table chunks
 app/recovery.py    heartbeat, interrupted runs
-app/allinone.py    one container: Temporal+worker+API
+app/engine.py      engine app: Temporal+UI+worker
 app/auth.py        who is calling + groups         app/worker.py, app/devserver.py
 ```

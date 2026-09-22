@@ -41,9 +41,9 @@ One small key-value table, read by ID. The cheapest Postgres Flexible Server is 
 
 Work's Temporal on AKS (persistence, auth, namespaces), private networking/VNet-integrated environment, multi-replica workers, the approved registry and gateway.
 
-## One container (the work shape)
+## Two apps (the work shape)
 
-The work environment's MCP server deploys one image as one HTTP app with Easy Auth and a system-assigned identity, so the three-app layout above cannot be used there. `python -m app.allinone` (the image default) runs Temporal, the worker and the API in one container; records, state, logs and audit events are already external, so replicas are disposable. The lab keeps the three-app pattern for scale-to-zero cost control. Deployment at work: [work-deployment.md](work-deployment.md).
+The work environment's MCP server deploys one image as one HTTP app with Easy Auth and a system-assigned identity, so the three-app layout above cannot be used there. Instead: the root `Dockerfile` is the API app and `deploy/engine/Dockerfile` is the engine app (`python -m app.engine`: Temporal dev server, its web UI behind Easy Auth, and the worker). Only the engine holds Azure deploy rights. The lab keeps the three-app pattern for scale-to-zero cost control. Deployment at work: [work-deployment.md](work-deployment.md).
 
 ## Direct managed identity (added after the federation work)
 

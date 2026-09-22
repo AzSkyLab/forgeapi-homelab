@@ -1,13 +1,13 @@
-"""Everything in one container: `python -m app.allinone`.
+"""The engine container: Temporal server + Temporal web UI + the forgeapi worker.
 
-For platforms that deploy one image as one HTTP app: starts a Temporal dev server, the worker and
-the API. Each replica is self-contained (its own Temporal, so plan and apply always meet the same
-worker); records, Terraform state, logs and audit events are all outside the container. If any of
-the three processes stops, the rest are stopped and the container exits non-zero so the platform
-restarts it; deployments that were running are recovered by `app/recovery.py`.
+`python -m app.engine`. For a two-app layout where the API is one HTTP app and this is the other.
+Temporal listens on 7233 (gRPC, for the API and the worker here) and serves its UI on the app's
+HTTP port (8000, or $PORT), which the platform puts Easy Auth in front of. The worker connects to
+the local server. If any process stops, the rest are stopped and the container exits non-zero so
+the platform restarts it; a deployment that was running is recovered by `app/recovery.py`.
 
-Set FORGEAPI_TEMPORAL_ADDRESS to use an existing Temporal service; no local server is started
-then."""
+The Temporal dev server keeps history in memory: it is for getting started. To use an existing
+Temporal service instead, set FORGEAPI_TEMPORAL_ADDRESS and only the worker is started."""
 
 import os
 import signal
@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 
-LOCAL_TEMPORAL = "127.0.0.1:7233"
+LOCAL = "127.0.0.1:7233"
 
 
 def _wait_for_port(address: str, seconds: int) -> bool:
@@ -32,14 +32,14 @@ def _wait_for_port(address: str, seconds: int) -> bool:
 
 
 def main() -> int:
-    port = os.environ.get("PORT", "8000")
+    ui_port = os.environ.get("PORT", "8000")
     external = os.environ.get("FORGEAPI_TEMPORAL_ADDRESS")
-    env = {**os.environ, "FORGEAPI_TEMPORAL_ADDRESS": external or LOCAL_TEMPORAL}
+    env = {**os.environ, "FORGEAPI_TEMPORAL_ADDRESS": external or LOCAL}
     children: dict[str, subprocess.Popen] = {}
 
     def start(name: str, *command: str) -> None:
         children[name] = subprocess.Popen(command, env=env)  # noqa: S603
-        print(f"[allinone] started {name} (pid {children[name].pid})", flush=True)
+        print(f"[engine] started {name} (pid {children[name].pid})", flush=True)
 
     def stop_all(*_signal) -> None:
         for child in children.values():
@@ -50,20 +50,23 @@ def main() -> int:
     signal.signal(signal.SIGINT, stop_all)
 
     if not external:
-        start("temporal", "temporal", "server", "start-dev", "--ip", "127.0.0.1",
-              "--headless", "--log-level", "warn")  # fmt: skip
-        if not _wait_for_port(LOCAL_TEMPORAL, 60):
-            print("[allinone] temporal did not start", flush=True)
+        start(
+            "temporal", "temporal", "server", "start-dev",
+            "--ip", "0.0.0.0", "--port", "7233",
+            "--ui-ip", "0.0.0.0", "--ui-port", ui_port, "--ui-disable-news-fetch",
+            "--log-level", "warn",
+        )  # fmt: skip
+        if not _wait_for_port(LOCAL, 60):
+            print("[engine] temporal did not start", flush=True)
             stop_all()
             return 1
     start("worker", sys.executable, "-m", "app.worker")
-    start("api", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", port)  # noqa: S104
 
     while True:
         for name, child in children.items():
             code = child.poll()
             if code is not None:
-                print(f"[allinone] {name} exited with {code}; stopping the rest", flush=True)
+                print(f"[engine] {name} exited with {code}; stopping the rest", flush=True)
                 stop_all()
                 for other in children.values():
                     try:

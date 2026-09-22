@@ -482,3 +482,21 @@ The engineer asked whether the work brief had been maintained. It had been updat
 **Bugs found on the way:** the image's baked-in `FORGEAPI_TEMPORAL_ADDRESS` made the supervisor think an external Temporal was configured; the Temporal binary refuses to start for a bare UID (`$USER set in environment`); `/data` was root-owned for a plain volume.
 
 **Never proven anywhere (also listed in the brief):** Easy Auth's identity header and group claims reaching forgeapi; a system-assigned identity running Terraform (a user-assigned one is proven through the same code path); the one-container image on Container Apps; private endpoints; restricted egress; the MCP server.
+
+## 2026-09-21 — Two apps for the work MCP server: API app + engine app (branch `two-apps`)
+
+Engineer clarified the intended shape: one ACA hosts the **API**, another hosts a **complete Temporal install with its UI plus the worker**, deployed as two apps by the MCP server. The Temporal dev server is for getting started; the organisation's AKS Temporal takes over when the API moves to a real dev environment. The single-container mode from the previous entry is removed.
+
+**Built:** `app/engine.py` + `deploy/engine/Dockerfile` (Temporal server on 7233, Temporal web UI on the app's HTTP port, worker; supervisor exits if any process stops; `FORGEAPI_TEMPORAL_ADDRESS` set → worker only). Root image default back to the API alone. `app/allinone.py` and `deploy/temporal/Dockerfile` removed. Brief rewritten: two apps, per-app roles (the API identity gets **no** Azure deploy rights), the internal-TCP-7233 check as the first thing to verify, engine pinned at one always-on replica, per-app troubleshooting.
+
+| Check | Result |
+| --- | --- |
+| `uv run pytest` / `ruff` | PASS: 121 / clean (brief-vs-code tests included) |
+| Two Docker containers on one network: API image + engine image, shared record store | PASS: `local-file` deployment via the API app ran on the engine's worker → `succeeded`; audit shows API (`create accepted`) and worker (`state succeeded`) writing; Temporal UI answered 200 on the engine's HTTP port |
+| Kill the worker inside the engine | PASS: `[engine] worker exited with -9; stopping the rest`, container exited |
+| API app with the engine down | PASS: `POST /deployments` → 503 |
+| Compose stack after the image change | PASS |
+
+**Finding during the proof:** with each container on its own SQLite the worker could not see the API's record (`'NoneType' object has no attribute 'pattern'` in the worker). Not a hosted concern (Table Storage is shared) but recorded in the brief's troubleshooting as "deployments stay accepted". The worker's error there could be clearer.
+
+**Never proven:** an MCP-deployed app exposing an internal TCP port (the layout depends on it); everything else on the brief's list.
