@@ -1,6 +1,6 @@
 # Repository working instructions
 
-- **Deploying in the work environment?** Read `docs/work-deployment.md` first and follow it; do not set up local development there.
+- **Deploying in the work environment?** Read `docs/work-deployment.md` first and follow it; do not set up local development there. (`docs/work-prompt.md` is the prompt that starts such a session.)
 - This branch is the Python/FastAPI rewrite. Start with `docs/rewrite-plan.md` (rules, milestones, parked list) and `docs/progress.md` (what works, next task). `docs/archive-go/` is reference only; do not revive its scope.
 - **Keep it small.** Work on the next milestone only. Do not add anything from the plan's Parked list (retries, cancellation, idempotency, outbox, authz, OTel, Postgres, Docker) unless the engineer asks for it. The engineer builds ahead on the home lab; work-Mac verification is tracked separately in `docs/progress.md`.
 - Local start must need nothing but `uv`: no auth, Azure, Docker or credentials. Auth and Azure are opt-in settings added at their milestones.
@@ -12,5 +12,5 @@
 - Outputs (`docs/outputs.md`): never store, return or log a sensitive output value; report its name in `withheld_outputs`. Secrets live in the pattern's own Key Vault and the API passes references. Do not add a reveal endpoint.
 - Patterns: no Terraform in this repo except `examples/`. Patterns are root modules in their own git repos, registered in `patterns.yaml`, versioned by tag and pinned to a commit per deployment. Pattern changes go to the pattern repo plus a new tag, never into the API.
 - Azure scope: only patterns in `patterns.yaml`, in the lab subscription, free or near-free resources. No paid compute or new pattern types without explicit approval. Live resources and their state are listed in `docs/progress.md`; do not delete them without being asked. `.local/data/` still holds local state for one older vault: never delete it.
-- **Keep `docs/work-deployment.md` current.** It is what the work environment is deployed from. Any change to settings, identities, storage, request fields, endpoints, pattern-repo requirements, verification or known limits updates that brief **in the same PR**, including its "Current as of" line.
+- **Keep `docs/work-deployment.md` and `docs/work-prompt.md` current.** It is what the work environment is deployed from. Any change to settings, identities, storage, request fields, endpoints, pattern-repo requirements, verification or known limits updates that brief **in the same PR**, including its "Current as of" line.
 - Update `docs/progress.md` with behavior, evidence and the next task. Do not commit or push without being asked.

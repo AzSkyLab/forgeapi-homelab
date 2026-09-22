@@ -2,7 +2,7 @@
 
 You are deploying **forgeapi** into an existing, private Azure Container Apps environment with the organisation's MCP server. Everything here was built and proven in a home lab first; your job is to reproduce a known-good shape, not to design. Read this whole file before calling any tool.
 
-**Current as of:** `main` at image tag `v0.7.0` (2026-09-21), 121 tests. forgeapi is a **dev-environment** self-service API: there is no production approval workflow, by decision. Companion documents, all in `docs/`: `tenancy.md` (business units, sizes, budgets), `audit.md`, `outputs.md`, `hosting-plan.md`, and `progress.md` (every lab run with its evidence and gaps).
+**Current as of:** `main` at image tag `v0.7.0` (2026-09-21), 122 tests. To start a session at work, paste `docs/work-prompt.md`; it points here. forgeapi is a **dev-environment** self-service API: there is no production approval workflow, by decision. Companion documents, all in `docs/`: `tenancy.md` (business units, sizes, budgets), `audit.md`, `outputs.md`, `hosting-plan.md`, and `progress.md` (every lab run with its evidence and gaps).
 
 ## How the MCP server shapes this
 
@@ -31,7 +31,7 @@ Everything that matters lives **outside** the containers (records, Terraform sta
 - **Read before you write.** Do [Step 0](#step-0-discover-and-verify-read-only) before creating anything.
 - **Never print, log or paste secrets** (private keys, tokens). Reference them by Key Vault secret name only.
 - **Stop and ask the engineer** before: creating or changing role assignments or app registrations, deploying any real pattern (anything except `local-file` and `azure-identity-check`), or when a verification step fails twice.
-- Do not run `uv`, tests or local Docker. Local development is deliberately skipped at work; the code is already tested (121 tests in the lab, including real Terraform, Temporal and storage-emulator runs).
+- Do not run `uv`, tests or local Docker. Local development is deliberately skipped at work; the code is already tested (122 tests in the lab, including real Terraform, Temporal and storage-emulator runs).
 - Do not change application code. The only file you edit is `patterns.yaml`. The engine Dockerfile's `FROM` line names the main image; if the MCP server cannot resolve it, point it at the image the MCP server built for the API app.
 - Report at the end using the [report format](#report-format). State plainly what was verified and what was not.
 
@@ -200,7 +200,7 @@ Every entry below actually happened in the lab.
 | `signed_in_object_id` is not the engine identity's principal ID | a federated, certificate or client-ID setting is present | remove the "leave unset" variables |
 | The engine keeps restarting; logs show `[engine] … exited` | Temporal or the worker died; the supervisor stops the rest on purpose | read the lines just before it. Usual causes: a wrong setting, or storage/Key Vault unreachable |
 | `503 job engine unavailable` on POST | the API app cannot reach the engine on 7233 | engine running? internal TCP port exposed? `FORGEAPI_TEMPORAL_ADDRESS` is `<engine-app-address>:7233`, not an HTTPS URL |
-| Deployments stay `accepted` forever | the engine's worker is not running, or it cannot read the record the API wrote (different record store settings on the two apps) | engine logs; both apps must have identical `FORGEAPI_DB_BACKEND` / table settings |
+| Deployments stay `accepted` forever; engine logs say `is not in this worker's record store` | the API and the engine are not sharing a record store (different `FORGEAPI_DB_BACKEND` / table settings) | make both apps' storage settings identical |
 | A deployment shows `failed` with `interrupted: the worker stopped…` | the engine was stopped mid-run (scale-in, restart, new revision) | `POST …/retry`. Pin the engine at one always-on replica if it keeps happening |
 | `Error acquiring the state lock` as the **final** error of a deployment | the automatic unlock was already tried once and the lock is still held: something other than forgeapi holds it (a person running Terraform against that state) | find out who; never unlock by hand without knowing |
 | `GET /me` shows `"business_units": null` | the mapping is not configured | set `FORGEAPI_TENANTS_YAML` (Step 3) |

@@ -6,6 +6,18 @@ from app import audit, catalog, db, recovery, terraform
 from app.models import State
 
 
+def _load(deployment_id: str):
+    deployment = db.get(deployment_id)
+    if deployment is None:
+        # The API wrote a record this worker cannot see: the two are not sharing a record store
+        # (different FORGEAPI_DB_BACKEND / table settings, or two separate SQLite files).
+        raise RuntimeError(
+            f"deployment {deployment_id} is not in this worker's record store; the API and the "
+            "worker must use the same FORGEAPI_DB_BACKEND and storage settings"
+        )
+    return deployment
+
+
 def _source(deployment) -> str:
     # Pinned to the commit resolved when the request was accepted, not to the (movable) tag.
     pattern = catalog.get(deployment.pattern)
@@ -27,7 +39,7 @@ def _variables(deployment) -> dict:
 
 @activity.defn
 def plan(deployment_id: str) -> None:
-    deployment = db.get(deployment_id)
+    deployment = _load(deployment_id)
     db.update(deployment_id, State.planning)
     with recovery.alive(deployment_id):
         terraform.plan(
@@ -37,7 +49,7 @@ def plan(deployment_id: str) -> None:
 
 @activity.defn
 def apply(deployment_id: str) -> None:
-    deployment = db.get(deployment_id)
+    deployment = _load(deployment_id)
     db.update(deployment_id, State.applying)
     with recovery.alive(deployment_id):
         outputs, withheld = terraform.apply(
@@ -50,14 +62,14 @@ def apply(deployment_id: str) -> None:
 @activity.defn
 def mark_failed(deployment_id: str, error: str) -> None:
     db.update(deployment_id, State.failed, error=error)
-    deployment = db.get(deployment_id)
+    deployment = _load(deployment_id)
     if deployment:
         _outcome(deployment, "failed", error=error[:500])
 
 
 @activity.defn
 def destroy(deployment_id: str) -> None:
-    deployment = db.get(deployment_id)
+    deployment = _load(deployment_id)
     db.update(deployment_id, State.destroying)
     with recovery.alive(deployment_id):
         terraform.destroy(
