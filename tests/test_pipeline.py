@@ -338,3 +338,13 @@ output "host" { value = "db.example.internal" }
     }
     everything = shown.model_dump_json() + terraform.log_path(deployment.id).read_text()
     assert "hunter2" not in everything  # not in the record, the response or the log
+
+
+def test_worker_names_the_cause_when_it_cannot_see_the_record():
+    from app import activities
+
+    try:
+        activities.plan("dep_written_by_a_different_store")
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as err:
+        assert "same FORGEAPI_DB_BACKEND" in str(err)

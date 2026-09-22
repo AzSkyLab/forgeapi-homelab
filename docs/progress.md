@@ -500,3 +500,11 @@ Engineer clarified the intended shape: one ACA hosts the **API**, another hosts 
 **Finding during the proof:** with each container on its own SQLite the worker could not see the API's record (`'NoneType' object has no attribute 'pattern'` in the worker). Not a hosted concern (Table Storage is shared) but recorded in the brief's troubleshooting as "deployments stay accepted". The worker's error there could be clearer.
 
 **Never proven:** an MCP-deployed app exposing an internal TCP port (the layout depends on it); everything else on the brief's list.
+
+## 2026-09-21 — Tidy-up and the work prompt (branch `tidy`)
+
+- Worker now raises `deployment … is not in this worker's record store; the API and the worker must use the same FORGEAPI_DB_BACKEND and storage settings` instead of `'NoneType' object has no attribute 'pattern'` (found during the two-app proof). Tested. (A first attempt made the helper call itself and hung the whole suite for ten minutes; fixed.)
+- **`docs/work-prompt.md`:** the text to paste into an assistant at work, with two fill-in blocks (inputs; today's constraints). It frames the task and hands over to `docs/work-deployment.md`. README and AGENTS.md point at it; AGENTS.md requires both documents to be kept current together.
+- Stale note in `hosting-plan.md` about `aca.sh` corrected.
+
+Tests: 122 passing. Lab hosted copy: worker and Temporal at 0 running replicas (unchanged since the last check; not touched by this work).
