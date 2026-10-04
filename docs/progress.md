@@ -2,6 +2,30 @@
 
 Plan and milestone definitions: [rewrite-plan.md](rewrite-plan.md). Go-era progress: [archive-go/progress.md](archive-go/progress.md).
 
+## 2026-10-04 — AKS base rehearsed with Entra auth as shipped; work-day runbook
+
+Goal: close "Entra auth on AKS" before the move and turn the work deployment into an ordered
+checklist. Home lab only; the lab Entra tenant used read-only (token issuance); nothing created
+in Entra or any cloud.
+- kind v0.30 cluster, image built from `main` `96611a8`, in-cluster Temporal dev server, Floci
+  AWS attached to the kind network (socat sidecar, one extra egress rule for port 4566 in the
+  scratchpad overlay). The `deploy/aks` ConfigMap **as shipped** (`entra` auth) with only tenant,
+  audience and Temporal address filled in; tenant mapping as the `forgeapi-tenants` Secret with
+  real lab group IDs.
+- Through the pod (port-forward): `/readyz` 200; no token / garbage / real ARM-audience token →
+  401; real caller token → only the `platform` unit (the pod fetched Entra JWKS through the
+  base NetworkPolicy's 443 egress); `hr` → 403 (validate and submit); S3 bucket plan → exact
+  digest → `succeeded` (404 → 200), `owned_by_caller` true, no account ID → destroy (404). Pod
+  3/3 Ready, 0 restarts; no bearer-token text in `api`/`worker` logs. Root's own script first
+  expected 403 for an environment absent from this mapping; the API correctly returned 422.
+- **Work-day runbook** added to `deploy/aks/README.md`: caller app registration, worker identity
+  and federated credential (AKS OIDC issuer, subject), RBAC and the optional Graph permission,
+  image, Secrets, apply, ordered verification (each lab-proven step marked), record, rollback.
+- Cleanup: cluster deleted, Floci project removed, empty `kind` network removed (0 containers).
+
+**Limits:** real-Entra workload identity, Azure Disk, real Azure RBAC and the work Temporal remain
+for the work cluster; the image was built locally, not published.
+
 ## 2026-10-04 — Merged to main; first hosted CI run passed
 
 At the engineer's request (no PRs): `platform-2026-10` pushed and `main` fast-forwarded to it

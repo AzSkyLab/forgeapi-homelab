@@ -40,6 +40,10 @@ run, emulator or agent is pending.
 
 ### Latest verified checkpoint
 
+- **Newest (2026-10-04): AKS base rehearsed on kind with `entra` auth as shipped** and real
+  lab-tenant tokens (401s, group scoping, deploy/destroy through the pod, JWKS through the 443
+  egress rule); **work-day runbook** in `deploy/aks/README.md`. **Next:** the work cluster
+  (follow the runbook); optionally publish an image by pushing a `v*` tag (engineer's call).
 - **Newest (2026-10-04): merged to `main`** (fast-forward to `bd19198`, at the engineer's request;
   no PRs). First GitHub-hosted Check run passed (run 37240347133: `check`, `image-scan`). Image
   publication still not run.

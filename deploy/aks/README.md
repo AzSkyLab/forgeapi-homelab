@@ -1,6 +1,6 @@
 # AKS deployment base
 
-Current as of: 2026-10-04. Kustomize base for the engineer's hosting decision: Temporal runs on
+Current as of: 2026-10-04 (work-day runbook added). Kustomize base for the engineer's hosting decision: Temporal runs on
 an AKS cluster; this API and its Temporal worker run on the **same** AKS cluster as one
 single-replica pod, because the SQLite operation ledger and saved Terraform plans must sit on
 one local disk (see `docs/agent-architecture.md`, AGENTS.md). Validated with
@@ -78,6 +78,53 @@ curl -fsS http://127.0.0.1:8000/healthz  # {"status":"ok","contract":"agent-v1"}
 `/readyz` fails closed if either the local ledger or Temporal is unreachable; it never mutates
 anything. Beyond this, no end-to-end deploy/apply has been run against a real AKS cluster from
 this change.
+
+## Work-day runbook
+
+The order to follow on the work cluster. Steps marked **(lab-proven)** ran on 2026-10-04 in a
+kind rehearsal of this exact base with a real Entra tenant (see below); the rest can only be
+proven at work. Stop at the first failure and record it in `docs/progress.md`.
+
+1. **Caller app registration** (the API's audience). Expose an API scope, set
+   `groupMembershipClaims: SecurityGroup` and, if users are in many groups, emit only groups
+   assigned to the application (a token with group overage is refused). Note its tenant ID and
+   application (client) ID for `FORGEAPI_ENTRA_TENANT_ID` / `FORGEAPI_ENTRA_AUDIENCE`.
+   **(lab-proven:** v2 tokens with a `groups` claim validate in the pod.)
+2. **Worker identity.** A user-assigned managed identity (or app registration) with a federated
+   credential: issuer = `az aks show -g <rg> -n <cluster> --query oidcIssuerProfile.issuerUrl -o tsv`,
+   subject = `system:serviceaccount:<namespace>:forgeapi`, audience `api://AzureADTokenExchange`.
+   Grant it only the Azure RBAC roles the registered patterns need on the target subscriptions
+   (plus Storage Blob Data Contributor on the state account if `FORGEAPI_STATE_*` is set). For
+   `FORGEAPI_LIVE_GROUP_CHECKS`, also Microsoft Graph `GroupMember.Read.All` (application, admin
+   consent). **(Not provable in the lab:** the token exchange with real Entra; the provider side
+   is proven against Floci.)
+3. **Image.** Push a `v<version>` tag to run `.github/workflows/image.yml` (checks, then
+   `ghcr.io/<owner>/forgeapi` with SBOM and provenance), or import the same build into your
+   registry. Put the digest in `kustomization.yaml` `images:`.
+4. **Placeholders and Secrets** as listed above. Tenant mapping as the `forgeapi-tenants`
+   Secret **(lab-proven)**; validate it first with `python -m app.team_check tenants.yaml
+   --catalog patterns.yaml` (exit 0). Optional Temporal TLS: mount the PEMs and set
+   `FORGEAPI_TEMPORAL_TLS*` (settings proven in a real handshake, not with your Temporal).
+5. **Apply** and wait for `rollout status`; the pod must show every container Ready with 0
+   restarts **(lab-proven)**.
+6. **Verify, in this order** (port-forward or your client namespace; use a real caller token,
+   e.g. `az account get-access-token --resource api://<audience-app-id>`):
+   - `/readyz` 200 (ledger ok, temporal ok);
+   - `GET /v1/agent` with no token → 401, with a garbage token → 401, with a token for another
+     resource (`--resource https://management.azure.com/`) → 401 **(lab-proven)**;
+   - with the caller token: discovery lists only the business units the caller's groups grant;
+     validate/submit into a unit or environment the caller lacks → 403 **(lab-proven)**;
+   - deploy the cheapest registered pattern in a dev zone: plan → review `changes` → execute the
+     exact `plan_digest` → `succeeded`; read the resource back in the Azure portal or CLI;
+     resource shows `owned_by_caller: true` and no subscription ID **(lab-proven on an emulator)**;
+   - `POST /v1/resources/{id}/drift-check` → `in_sync`; destroy intent → plan → execute → gone;
+   - `kubectl logs` for `api` and `worker` contain no bearer tokens **(lab-proven)**.
+7. **Record** the image digest, operation IDs and readbacks in `docs/progress.md`; update
+   `docs/work-deployment.md` (what is now proven at work).
+
+Rollback: scale the StatefulSet to 0 (the disk and ledger stay), redeploy the previous image
+digest, scale back to 1. Pending `planned` operations made by a different Terraform version
+fail safely and must be resubmitted; never edit the ledger or force-unlock state.
 
 ## Single-replica: what it means
 
@@ -169,4 +216,14 @@ listen elsewhere); after adding an egress rule for the emulator ports in the reh
 the pod planned, applied and destroyed an Azure resource group + storage account + container,
 an S3 bucket and a GCS bucket (emulator readbacks 200, then 404), ran a drift check, and an
 `uncertain` apply from the blocked attempt was resolved through the operator reconcile path.
-Not proven here: Entra auth, workload identity, Azure Disk (`managed-csi`) and real Azure.
+Not proven in these two runs: Entra auth (see the third run below), workload identity with real Entra, Azure Disk (`managed-csi`) and real Azure.
+
+A third, work-like run (2026-10-04) applied this base with the ConfigMap **as shipped**
+(`FORGEAPI_AUTH_MODE=entra`; only the tenant, audience and Temporal address filled in), an image
+built from `main`, the tenant mapping as the `forgeapi-tenants` Secret keyed by real lab Entra
+group IDs, and Floci AWS as the cloud. Through the pod: `/readyz` 200; no token, a garbage token
+and a real tenant token for Azure Resource Manager → 401; the real caller token (fetched JWKS from
+`login.microsoftonline.com` through the NetworkPolicy's 443 egress) → only the caller's business
+unit; another unit → 403; an S3 bucket planned, applied by exact digest (404 → 200), owned by the
+caller, no account ID shown, destroyed (404). No bearer token text in the `api` or `worker` logs;
+0 restarts. Cluster, emulator and `kind` network removed afterwards.
