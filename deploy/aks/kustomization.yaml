@@ -1,0 +1,15 @@
+# Namespace-agnostic base: apply with a namespace of your choosing, e.g.
+#   kubectl apply -k deploy/aks -n forgeapi
+# or add `namespace: forgeapi` to a copy/overlay of this file.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - configmap.yaml
+  - statefulset.yaml
+  - service.yaml
+  - networkpolicy.yaml
+images:
+  - name: ghcr.io/OWNER/forgeapi
+    newName: ghcr.io/OWNER/forgeapi
+    newTag: TAG

@@ -1,6 +1,7 @@
 """Optional Entra bearer-token validation. AUTH_MODE=none (default) is for loopback development."""
 
 import base64
+import ipaddress
 import json
 from functools import lru_cache
 
@@ -31,11 +32,31 @@ def _from_easy_auth(request: Request) -> Caller:
     if not header:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "no authenticated principal")
     try:
-        claims = json.loads(base64.b64decode(header)).get("claims", [])
+        envelope = json.loads(base64.b64decode(header, validate=True))
     except ValueError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid principal header") from None
-    caller_id = next((c["val"] for c in claims if c.get("typ") in _OID), "unknown")
-    return Caller(caller_id, frozenset(c["val"] for c in claims if c.get("typ") == "groups"))
+    if not isinstance(envelope, dict) or not isinstance(envelope.get("claims"), list):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid principal header")
+    caller_id = None
+    groups = set()
+    for claim in envelope["claims"]:
+        if not isinstance(claim, dict) or not isinstance(claim.get("typ"), str):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid principal header")
+        kind = claim["typ"]
+        if kind in _OID:
+            value = claim.get("val")
+            if not isinstance(value, str) or not value.strip():
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid principal header")
+            if caller_id is None:
+                caller_id = value
+        elif kind == "groups":
+            value = claim.get("val")
+            if not isinstance(value, str) or not value.strip():
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid principal header")
+            groups.add(value)
+    if caller_id is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid principal header")
+    return Caller(caller_id, frozenset(groups))
 
 
 def require_caller(
@@ -43,6 +64,17 @@ def require_caller(
 ) -> Caller:
     """Who is calling and which Entra groups they are in."""
     if settings.auth_mode == "none":
+        if not settings.allow_unauthenticated_remote:
+            host = request.client.host if request.client else None
+            try:
+                loopback = host is not None and ipaddress.ip_address(host).is_loopback
+            except ValueError:  # not even a parseable address (e.g. "testclient")
+                loopback = False
+            if not loopback:
+                raise HTTPException(
+                    status.HTTP_401_UNAUTHORIZED,
+                    "authentication is not configured for remote callers",
+                )
         groups = frozenset(g.strip() for g in settings.dev_groups.split(",") if g.strip())
         return Caller("local", groups)
     if settings.auth_mode == "easyauth":
@@ -76,5 +108,16 @@ def require_caller(
             "your token omits group membership (too many groups); ask the platform team to "
             "configure the API's app registration to emit only groups assigned to it",
         )
-    caller_id = claims.get("oid") or claims.get("sub") or "unknown"
-    return Caller(caller_id, frozenset(claims.get("groups") or []))
+    caller_id = claims.get("oid")
+    if caller_id is None or caller_id == "":
+        caller_id = claims.get("sub")
+    if not isinstance(caller_id, str) or not caller_id.strip():
+        raise unauthorized
+    groups = claims.get("groups")
+    if groups is None:
+        groups = []
+    if not isinstance(groups, list) or any(
+        not isinstance(group, str) or not group.strip() for group in groups
+    ):
+        raise unauthorized
+    return Caller(caller_id, frozenset(groups))

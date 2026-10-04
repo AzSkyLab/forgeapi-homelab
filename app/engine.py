@@ -1,13 +1,13 @@
 """The engine container: Temporal server + Temporal web UI + the forgeapi worker.
 
-`python -m app.engine`. For a two-app layout where the API is one HTTP app and this is the other.
+`python -m app.engine`. The API and worker must share the same durable local operation disk.
 Temporal listens on 7233 (gRPC, for the API and the worker here) and serves its UI on the app's
 HTTP port (8000, or $PORT), which the platform puts Easy Auth in front of. The worker connects to
 the local server. If any process stops, the rest are stopped and the container exits non-zero so
-the platform restarts it; a deployment that was running is recovered by `app/recovery.py`.
+the platform restarts it. New operations use Temporal activity timeouts; legacy uses recovery.py.
 
-The Temporal dev server keeps history in memory: it is for getting started. To use an existing
-Temporal service instead, set FORGEAPI_TEMPORAL_ADDRESS and only the worker is started."""
+The Temporal dev server persists history under DATA_DIR; it is for development only. Set
+FORGEAPI_TEMPORAL_ADDRESS to use an existing service and start only the worker."""
 
 import os
 import signal
@@ -15,6 +15,8 @@ import socket
 import subprocess
 import sys
 import time
+
+from app.settings import settings
 
 LOCAL = "127.0.0.1:7233"
 
@@ -50,11 +52,13 @@ def main() -> int:
     signal.signal(signal.SIGINT, stop_all)
 
     if not external:
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
         start(
             "temporal", "temporal", "server", "start-dev",
             "--ip", "0.0.0.0", "--port", "7233",
             "--ui-ip", "0.0.0.0", "--ui-port", ui_port, "--ui-disable-news-fetch",
             "--log-level", "warn",
+            "--db-filename", str(settings.data_dir.resolve() / "temporal.db"),
         )  # fmt: skip
         if not _wait_for_port(LOCAL, 60):
             print("[engine] temporal did not start", flush=True)

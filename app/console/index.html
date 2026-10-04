@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>ForgeAPI Developer Portal</title>
+<link rel="stylesheet" href="/console/console.css">
+<script src="/console/console.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo" aria-hidden="true"></span>ForgeAPI <span class="muted">portal</span></div>
+  <nav id="nav" aria-label="Sections">
+    <a href="#home" data-route="home">Home</a>
+    <a href="#deploy" data-route="deploy">Deploy</a>
+    <a href="#infrastructure" data-route="infrastructure">Infrastructure</a>
+    <a href="#fleet" data-route="fleet">Fleet</a>
+    <a href="#apps" data-route="apps">Apps</a>
+    <a href="#zones" data-route="zones">Landing zones</a>
+    <a href="#jobs" data-route="jobs">Jobs</a>
+    <a href="#history" data-route="history">History</a>
+    <a href="#catalog" data-route="catalog">Catalog</a>
+  </nav>
+  <div class="tools">
+    <label class="tool-field">Environment
+      <select id="env-filter" aria-label="Environment filter"><option value="">all environments</option></select>
+    </label>
+    <span id="zone-chip" class="zone-chip" hidden><span id="zone-chip-text"></span><button type="button" id="zone-chip-clear" class="x" aria-label="Clear zone filter">x</button></span>
+    <label class="toggle"><input type="checkbox" id="auto" checked> Auto-refresh <span class="muted">5s</span></label>
+    <details id="auth" class="auth">
+      <summary>Access token</summary>
+      <form id="token-form" class="auth-pop" autocomplete="off">
+        <label for="token">Paste access token</label>
+        <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="Bearer token (kept in memory only)">
+        <div class="row">
+          <button type="submit" class="btn primary">Use token</button>
+          <button type="button" id="token-clear" class="btn">Clear</button>
+        </div>
+        <p class="muted small" id="token-state">No token set. Not needed when the API runs without authentication.</p>
+      </form>
+    </details>
+  </div>
+</header>
+<div id="banner" class="banner" role="alert" hidden></div>
+<main id="view" tabindex="-1" aria-live="polite"><p class="muted">Loading...</p></main>
+<noscript><p class="banner">The portal needs JavaScript. It loads nothing from other sites.</p></noscript>
+</body>
+</html>

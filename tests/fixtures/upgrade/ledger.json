@@ -1,0 +1,69 @@
+{
+  "provenance": "Captured 2026-10-01 with /tmp/forge-versioning-before/app Intent and ledger before versioned routes. IDs and plan digest normalized; local-file data only. Saved plan bytes excluded.",
+  "request": {
+    "pattern": "local-file",
+    "inputs": {
+      "filename": "upgrade.txt",
+      "content": "saved old plan"
+    }
+  },
+  "idempotency_key": "old-request",
+  "request_material": {
+    "action": "deploy",
+    "resource_id": null,
+    "pattern": "local-file",
+    "version": null,
+    "expected_commit": null,
+    "business_unit": null,
+    "environment": null,
+    "size": null,
+    "inputs": {
+      "filename": "upgrade.txt",
+      "content": "saved old plan"
+    }
+  },
+  "request_fingerprint": "5de2a763d13a4c7d8619fc41716ec48a50dcc81543fb758f55f34fb6929e99a8",
+  "operations": [
+    {
+      "id": "op_11111111111111111111111111111111",
+      "resource_id": "res_22222222222222222222222222222222",
+      "actor": "local",
+      "request_key": "old-request",
+      "fingerprint": "5de2a763d13a4c7d8619fc41716ec48a50dcc81543fb758f55f34fb6929e99a8",
+      "state": "planned",
+      "body": "{\"pattern\": \"local-file\", \"version\": \"local\", \"commit\": null, \"source\": \"__LOCAL_EXAMPLE__\", \"inputs\": {\"filename\": \"upgrade.txt\", \"content\": \"saved old plan\"}, \"cloud\": null, \"previous_operation_id\": null, \"id\": \"op_11111111111111111111111111111111\", \"resource_id\": \"res_22222222222222222222222222222222\", \"actor\": \"local\", \"action\": \"deploy\", \"state\": \"planned\", \"created_at\": \"2026-10-01T19:58:42.393696+00:00\", \"updated_at\": \"2026-10-01T19:58:42.394057+00:00\", \"plan_digest\": \"__PLAN_DIGEST__\", \"changes\": [{\"address\": \"local_file.this\", \"type\": \"local_file\", \"actions\": [\"create\"]}], \"outputs\": null, \"withheld_outputs\": null, \"error\": null}"
+    }
+  ],
+  "resources": [
+    {
+      "id": "res_22222222222222222222222222222222",
+      "body": "{\"pattern\": \"local-file\", \"version\": \"local\", \"commit\": null, \"source\": \"__LOCAL_EXAMPLE__\", \"inputs\": {\"filename\": \"upgrade.txt\", \"content\": \"saved old plan\"}, \"cloud\": null, \"previous_operation_id\": null, \"id\": \"res_22222222222222222222222222222222\", \"actor\": \"local\", \"estimated_monthly_cost\": 0, \"operation_id\": \"op_11111111111111111111111111111111\"}"
+    }
+  ],
+  "events": [
+    {
+      "seq": 1,
+      "operation_id": "op_11111111111111111111111111111111",
+      "actor": "local",
+      "action": "operation.create",
+      "outcome": "accepted",
+      "timestamp": "2026-10-01T19:58:42.393711+00:00"
+    },
+    {
+      "seq": 2,
+      "operation_id": "op_11111111111111111111111111111111",
+      "actor": "temporal-worker",
+      "action": "operation.state",
+      "outcome": "planning",
+      "timestamp": "2026-10-01T19:58:42.393941+00:00"
+    },
+    {
+      "seq": 3,
+      "operation_id": "op_11111111111111111111111111111111",
+      "actor": "temporal-worker",
+      "action": "operation.state",
+      "outcome": "planned",
+      "timestamp": "2026-10-01T19:58:42.394079+00:00"
+    }
+  ]
+}

@@ -1,3 +1,7 @@
+import hashlib
+import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -5,7 +9,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from app.main import app, get_dispatcher
+from app.legacy import app, get_dispatcher
 from app.settings import settings
 
 REPO = Path(__file__).resolve().parent.parent
@@ -38,8 +42,15 @@ def pattern_repo(tmp_path) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def isolated_settings(tmp_path, monkeypatch, pattern_repo):
+def isolated_settings(request, tmp_path, monkeypatch, pattern_repo, tmp_path_factory):
     """Each test gets its own data dir, catalog and default (no-auth, no-Azure) settings."""
+    if request.config.getoption("--floci"):
+        # Cloud providers are hundreds of MB: one shared cache (Terraform symlinks from it)
+        # instead of a copy per test, which filled a 31 GB tmpfs.
+        shared = tmp_path_factory.getbasetemp() / "plugin-cache"
+        shared.mkdir(exist_ok=True)
+        (tmp_path / "data").mkdir()
+        (tmp_path / "data" / "plugin-cache").symlink_to(shared)
     catalog_file = tmp_path / "patterns.yaml"
     catalog_file.write_text(
         yaml.safe_dump(
@@ -54,6 +65,8 @@ def isolated_settings(tmp_path, monkeypatch, pattern_repo):
     monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
     monkeypatch.setattr(settings, "catalog_path", catalog_file)
     monkeypatch.setattr(settings, "auth_mode", "none")
+    # TestClient's "testclient" host is not loopback; tests exercise "none" mode from off-box.
+    monkeypatch.setattr(settings, "allow_unauthenticated_remote", True)
     monkeypatch.setattr(settings, "github_token", None)
     for name in ("github_app_id", "github_app_installation_id", "github_app_private_key"):
         monkeypatch.setattr(settings, name, None)
@@ -90,3 +103,75 @@ def dispatched():
 @pytest.fixture
 def client(dispatched):
     return TestClient(app)
+
+
+def pytest_addoption(parser):
+    parser.addoption("--floci", action="store_true", help="Run real AWS/Azure/GCP Floci tests")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "floci: requires the local AWS, Azure and GCP Floci emulators"
+    )
+
+
+@pytest.fixture
+def recorded_dispatcher():
+    from app.dispatch import get_dispatcher
+    from app.main import app as operation_app
+    from tests.operation_support import RecordingDispatcher
+
+    recorder = RecordingDispatcher()
+    previous = operation_app.dependency_overrides.copy()
+    operation_app.dependency_overrides[get_dispatcher] = lambda: recorder
+    try:
+        yield recorder
+    finally:
+        operation_app.dependency_overrides = previous
+
+
+@pytest.fixture(scope="session", autouse=True)
+def terraform_provider_mirror(request, tmp_path_factory):
+    """Point Terraform at a persistent filesystem mirror so `init` never hits the registry.
+
+    Providers are mirrored once per example change into a per-user
+    cache; every later run, and every per-test data dir, installs from disk.
+    """
+    terraform = shutil.which("terraform")
+    if not terraform:
+        yield
+        return
+    names = ["local-file", "azure-identity-check"]
+    if request.config.getoption("--floci"):
+        names += ["floci-aws", "floci-azure", "floci-gcp"]  # floci-placed-* pin the same versions
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    mirror = cache / "forgeapi-tests" / "terraform-providers"
+    (mirror / ".markers").mkdir(parents=True, exist_ok=True)
+    sources: set[str] = set()
+    for name in names:
+        example = REPO / "examples" / name
+        text = "".join(f.read_text() for f in sorted(example.glob("*.tf")))
+        sources |= {
+            f"registry.terraform.io/{s}" for s in re.findall(r'source\s*=\s*"([^"]+)"', text)
+        }
+        marker = mirror / ".markers" / name
+        stamp = hashlib.sha256(text.encode()).hexdigest()
+        if not marker.exists() or marker.read_text() != stamp:
+            subprocess.run(
+                [terraform, "providers", "mirror", str(mirror)],
+                cwd=example,
+                check=True,
+                capture_output=True,
+            )
+            marker.write_text(stamp)
+    listed = ", ".join(f'"{s}"' for s in sorted(sources))
+    config = tmp_path_factory.mktemp("terraform-cli") / "terraform.rc"
+    config.write_text(
+        "provider_installation {\n"
+        f'  filesystem_mirror {{\n    path = "{mirror}"\n    include = [{listed}]\n  }}\n'
+        f"  direct {{\n    exclude = [{listed}]\n  }}\n"
+        "}\n"
+    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("TF_CLI_CONFIG_FILE", str(config))
+        yield

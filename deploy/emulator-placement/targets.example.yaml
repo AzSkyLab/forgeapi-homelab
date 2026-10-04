@@ -1,0 +1,17 @@
+# Dummy emulator identities only. Real work mappings are tenant-specific and must stay untracked.
+business_units:
+  work:
+    groups: [work-emulator]
+    patterns: [floci-azure, floci-aws, floci-gcp]
+    environments:
+      dev:
+        targets:
+          azure:
+            subscription_id: '00000000-0000-0000-0000-000000000001'
+            region: eastus
+          aws:
+            aws_account_id: '000000000000'
+            region: us-east-1
+          gcp:
+            project_id: forgeapi-emulator
+            region: us-central1

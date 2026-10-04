@@ -28,20 +28,29 @@ def test_lock_id_is_read_only_from_a_lock_error():
     assert terraform.lock_id("") is None
 
 
+class _FakeProc(SimpleNamespace):
+    """Stands in for the Popen handle `_run` now drives directly (pid, communicate())."""
+
+    pid = 1234
+
+    def communicate(self, timeout=None):
+        return self.stdout, self.stderr
+
+
 def test_a_dead_runs_lock_is_released_once_and_the_command_is_repeated(monkeypatch, tmp_path):
     monkeypatch.setattr(terraform, "deployment_dir", lambda d: tmp_path / d)
     (tmp_path / "dep_x" / "work").mkdir(parents=True)
     calls = []
 
-    def fake_run(command, **_kwargs):
+    def fake_popen(command, **_kwargs):
         args = command[1:]
         calls.append(args[0])
         locked = args[0] == "plan" and calls.count("plan") == 1
-        return SimpleNamespace(
+        return _FakeProc(
             returncode=1 if locked else 0, stdout="ok", stderr=LOCK_ERROR if locked else ""
         )
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     assert terraform._run("dep_x", "plan", "-no-color") == "ok"
     assert calls == ["plan", "force-unlock", "plan"]
     assert "belongs to an interrupted run" in terraform.log_path("dep_x").read_text()
@@ -55,11 +64,11 @@ def test_a_lock_that_survives_the_unlock_is_reported_not_looped(monkeypatch, tmp
     def always_locked(command, **_kwargs):
         calls.append(command[1])
         failing = command[1] == "plan"
-        return SimpleNamespace(
+        return _FakeProc(
             returncode=1 if failing else 0, stdout="", stderr=LOCK_ERROR if failing else ""
         )
 
-    monkeypatch.setattr(subprocess, "run", always_locked)
+    monkeypatch.setattr(subprocess, "Popen", always_locked)
     try:
         terraform._run("dep_y", "plan")
         raise AssertionError("expected TerraformError")

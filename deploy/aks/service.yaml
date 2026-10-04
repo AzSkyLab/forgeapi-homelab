@@ -1,0 +1,16 @@
+# Also named as the StatefulSet's governing serviceName. With one replica, per-pod DNS identity
+# isn't needed, so this is a plain ClusterIP rather than a headless service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: forgeapi
+  labels:
+    app: forgeapi
+spec:
+  type: ClusterIP
+  selector:
+    app: forgeapi
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000

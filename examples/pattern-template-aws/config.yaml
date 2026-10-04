@@ -1,0 +1,36 @@
+description: Private, versioned, encrypted S3 bucket with tags from the platform's business-unit and environment settings.
+category: storage
+components:
+  - S3 bucket
+  - Bucket versioning and noncurrent-version lifecycle
+  - Public access block
+  - Server-side encryption (SSE-S3)
+use_cases:
+  - Application data or artifact storage
+  - Log or export drop zone
+  - Starting point for new AWS patterns
+
+# Monthly estimate in USD per size per environment, used for business-unit budgets.
+# Lookup order: estimated_costs.<size>.<environment>, then estimated_costs.<environment>,
+# then a single number. An empty bucket is almost free; sizes assume light usage.
+estimated_costs:
+  small:
+    dev: 1
+    prd: 3
+  large:
+    dev: 5
+    prd: 25
+
+# sizing.<size>.<environment>.<variable>. A size is offered in an environment only if it has an
+# entry for it. Callers pick a size; they cannot set these variables themselves.
+sizing:
+  small:
+    dev:
+      noncurrent_retention_days: 7
+    prd:
+      noncurrent_retention_days: 30
+  large:
+    dev:
+      noncurrent_retention_days: 14
+    prd:
+      noncurrent_retention_days: 90

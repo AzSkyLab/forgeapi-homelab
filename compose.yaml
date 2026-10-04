@@ -1,49 +1,44 @@
-# `docker compose up --build`, then curl localhost:8000. Ports are loopback-only.
+# Optional single-host packaging. Native startup needs only uv; execution also needs Terraform/git.
 name: forgeapi
 
 x-app: &app
-  image: forgeapi:dev
   env_file:
     - path: .env
       required: false
-  # Read access to private pattern repos, passed at run time and never written to disk:
-  #   FORGEAPI_GITHUB_TOKEN=$(gh auth token) docker compose up --build -d
-  environment: &env
+  environment:
+    FORGEAPI_DB_BACKEND: sqlite
     FORGEAPI_GITHUB_TOKEN: ${FORGEAPI_GITHUB_TOKEN:-}
-    FORGEAPI_TEMPORAL_ADDRESS: temporal:7233  # the separate Temporal service below
-  # Deployment workspaces, Terraform state, logs and the SQLite database. Same directory the
-  # native (non-Docker) run uses, so state survives either way.
-  volumes: &data
+  volumes:
     - ./.local/data:/data
 
 services:
-  temporal:
-    image: temporalio/temporal:1.8.3
-    command: [server, start-dev, --ip, 0.0.0.0, --ui-port, "8233", --ui-disable-news-fetch]
-    ports: ["127.0.0.1:7233:7233", "127.0.0.1:8233:8233"]
-    healthcheck:
-      test: [CMD, temporal, operator, cluster, health, --address, 127.0.0.1:7233]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
   api:
     <<: *app
-    build: .  # the only service that builds; the worker reuses the image
+    image: forgeapi:dev
+    build: .
     command: [uvicorn, app.main:app, --host, 0.0.0.0, --port, "8000"]
     ports: ["127.0.0.1:8000:8000"]
-    depends_on:
-      temporal: {condition: service_healthy}
-
-  worker:
-    <<: *app
-    command: [python, -m, app.worker]
     environment:
-      <<: *env
+      FORGEAPI_DB_BACKEND: sqlite
+      FORGEAPI_GITHUB_TOKEN: ${FORGEAPI_GITHUB_TOKEN:-}
+      FORGEAPI_TEMPORAL_ADDRESS: engine:7233
+      # Lab-only: callers reach this over the docker bridge, not loopback, with no auth mode set.
+      FORGEAPI_ALLOW_UNAUTHENTICATED_REMOTE: "true"
+
+  engine:
+    <<: *app
+    # Separate image from api: this target bundles the Temporal dev-server binary (lab/local
+    # only, see app/engine.py); the default target api uses has no server binary in it.
+    image: forgeapi-engine:dev
+    build:
+      context: .
+      target: engine
+    ports: ["127.0.0.1:8233:8000"]
+    command: [python, -m, app.engine]
+    environment:
+      FORGEAPI_DB_BACKEND: sqlite
+      FORGEAPI_GITHUB_TOKEN: ${FORGEAPI_GITHUB_TOKEN:-}
       FORGEAPI_AZURE_CLIENT_CERTIFICATE_PATH: /run/executor/client.pfx
-    # Only the worker sees the Terraform executor certificate (read-only). The API never does.
     volumes:
       - ./.local/data:/data
       - ./.local/executor:/run/executor:ro
-    depends_on:
-      temporal: {condition: service_healthy}

@@ -2,7 +2,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from app import db
-from app.main import app, get_dispatcher
+from app.legacy import app, get_dispatcher
 from app.models import State
 from app.settings import settings
 from tests.conftest import git

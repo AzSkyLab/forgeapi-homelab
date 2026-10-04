@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forgeapi-emulator
+  namespace: forgeapi-emulator
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: catalog
+          command: [python, /scripts/bootstrap.py, --placed]
+      containers:
+        - name: api
+          env:
+            - {name: FORGEAPI_TENANTS_PATH, value: /placement/targets.example.yaml}
+            - {name: FORGEAPI_DEV_GROUPS, value: work-emulator}
+          volumeMounts:
+            - {name: targets, mountPath: /placement, readOnly: true}
+        - name: engine
+          command: [python, /scripts/engine.py, --storage-proxy]
+          env:
+            - {name: FORGEAPI_TENANTS_PATH, value: /placement/targets.example.yaml}
+          volumeMounts:
+            - {name: targets, mountPath: /placement, readOnly: true}
+      volumes:
+        - name: targets
+          configMap:
+            name: forgeapi-emulator-targets
+        - name: data
+          hostPath:
+            path: /var/lib/forgeapi-placement
+            type: Directory

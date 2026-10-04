@@ -4,6 +4,7 @@ settings or endpoints that do not exist, and must account for every setting that
 import re
 from pathlib import Path
 
+from app.client import TOKEN_ENV
 from app.main import app
 from app.settings import Settings
 
@@ -12,7 +13,7 @@ BRIEF = (Path(__file__).resolve().parent.parent / "docs" / "work-deployment.md")
 
 def test_every_setting_the_brief_names_exists():
     real = {f"FORGEAPI_{name.upper()}" for name in Settings.model_fields}
-    assert set(re.findall(r"FORGEAPI_[A-Z_]+", BRIEF)) <= real
+    assert set(re.findall(r"FORGEAPI_[A-Z_]+", BRIEF)) <= real | {TOKEN_ENV}
 
 
 def test_every_setting_is_accounted_for_in_the_brief():
@@ -22,12 +23,7 @@ def test_every_setting_is_accounted_for_in_the_brief():
 
 
 def test_every_endpoint_is_in_the_brief():
-    paths = {
-        route.path
-        for route in app.routes
-        if getattr(route, "methods", None)
-        and not route.path.startswith(("/docs", "/openapi", "/redoc"))
-    }
+    paths = set(app.openapi()["paths"]) | {"/v1/openapi.json"}
     written = BRIEF.replace("{id}", "{deployment_id}").replace("<id>", "{deployment_id}")
     missing = {path for path in paths if path not in written}
     assert missing == set()

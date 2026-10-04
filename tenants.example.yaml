@@ -6,6 +6,12 @@
 auditors:
   - 00000000-0000-0000-0000-0000000000ff
 
+# Optional: Entra groups whose members may resolve ("reconcile") an uncertain operation in any
+# business unit, after inspecting Terraform state and provider evidence themselves. It grants
+# nothing else: no deployments, no patterns, no other changes.
+operators:
+  - 00000000-0000-0000-0000-0000000000fe
+
 business_units:
   finance:
     groups:                               # Entra group object IDs; membership = access
@@ -29,3 +35,7 @@ business_units:
           - 00000000-0000-0000-0000-000000000002
         network:
           private_endpoint_subnet_id: /subscriptions/.../subnets/snet-private-endpoints
+        allow_destroy: false              # `action: destroy` intents are denied here (default true)
+        protected_resource_types:         # a plan that deletes or replaces any of these is denied
+          - azurerm_key_vault
+          - azurerm_storage_account

@@ -1,0 +1,16 @@
+# Optional integration-test services; never part of the hosted deployment.
+services:
+  aws:
+    image: floci/floci@sha256:f5aa8c18302cedb4f2385f5c4e455b3efc77fee6bf7b6e5d1712b2817ba102db
+    ports:
+      - "127.0.0.1:4566:4566"
+  azure:
+    image: floci/floci-az@sha256:3a71953fbc0940aa33bbc1c5e88211a320b66812c0840831a9f8558d3d3521c5
+    ports:
+      - "127.0.0.1:4577:4577"
+    environment:
+      FLOCI_AZ_TLS_ENABLED: "true"
+  gcp:
+    image: floci/floci-gcp@sha256:ea29a53b34d04ba05240cdc6833608e43ae2b0a67849e5b97f01a7224e1138ea
+    ports:
+      - "127.0.0.1:4588:4588"

@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from app import audit, db
-from app.main import app
+from app.legacy import app
 from app.models import State
 from app.settings import settings
 from tests.test_pipeline import _run_workflow

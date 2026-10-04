@@ -3,59 +3,47 @@
 import contextlib
 import hashlib
 import json
+import os
 import re
 import shutil
+import signal
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
 from app import catalog, logs
 from app.settings import settings
 
+GRACE = 60  # seconds given to a deadline-killed terraform to react to SIGINT before SIGKILL
+
+# A process started in the background by a shell (`worker &`) inherits SIGINT as ignored, and exec
+# keeps an ignored signal ignored: every Terraform child would then ignore the deadline's graceful
+# SIGINT and be SIGKILLed after GRACE without writing state. The worker's own disposition is left
+# alone (importing this module must not change its Ctrl-C behaviour); only children are reset, and
+# only in that case. Ponytail: preexec_fn runs between fork and exec, which is not fully
+# fork-safe in a threaded process, so it is used only when the parent ignores SIGINT and does
+# nothing but one signal call.
+_PARENT_IGNORES_SIGINT = signal.getsignal(signal.SIGINT) == signal.SIG_IGN
+
+
+def _default_sigint() -> None:
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
 
 class TerraformError(Exception):
     pass
 
 
-class _CacheGate:
-    """Reader/writer gate for Terraform's shared provider cache.
-
-    The cache is not safe while a provider is being installed into it: a second `init` corrupts
-    the download, and a `plan`/`apply` in another workspace can read a half-written package
-    ("cached package does not match any of the checksums"). So `init` (the only writer) runs
-    alone, and every other command runs in parallel with its peers. Waiting writers go first so
-    a steady stream of plans cannot starve an init."""
-
-    def __init__(self) -> None:
-        self._changed = threading.Condition()
-        self._readers = 0
-        self._writing = False
-        self._writers_waiting = 0
-
-    @contextlib.contextmanager
-    def held(self, *, exclusive: bool):
-        with self._changed:
-            if exclusive:
-                self._writers_waiting += 1
-                self._changed.wait_for(lambda: not self._writing and self._readers == 0)
-                self._writers_waiting -= 1
-                self._writing = True
-            else:
-                self._changed.wait_for(lambda: not self._writing and not self._writers_waiting)
-                self._readers += 1
-        try:
-            yield
-        finally:
-            with self._changed:
-                if exclusive:
-                    self._writing = False
-                else:
-                    self._readers -= 1
-                self._changed.notify_all()
+class _DeadlineExceeded(Exception):
+    pass
 
 
-_CACHE = _CacheGate()
+# The shared provider cache is not safe while a provider is being installed into it: a second
+# `init` corrupts the download, and a `plan`/`apply` elsewhere can read a half-written package.
+# `init` is the only writer, so only `init` takes this lock; plan/apply only read it.
+_INIT_LOCK = threading.Lock()
 
 
 def deployment_dir(deployment_id: str) -> Path:
@@ -66,11 +54,16 @@ def log_path(deployment_id: str) -> Path:
     return deployment_dir(deployment_id) / "terraform.log"
 
 
-def _env(subscription_id: str | None = None) -> dict[str, str]:
+def _env(subscription_id: str | None = None, token: bool = False) -> dict[str, str]:
     cache = settings.data_dir.resolve() / "plugin-cache"
     cache.mkdir(parents=True, exist_ok=True)
-    env = {**catalog.git_env(), "TF_IN_AUTOMATION": "1", "TF_INPUT": "0"}
+    env = {**catalog.git_env(token=token), "TF_IN_AUTOMATION": "1", "TF_INPUT": "0"}
     env["TF_PLUGIN_CACHE_DIR"] = str(cache)
+    # Without this, every fresh workspace (no lock file yet) re-extracts providers into the shared
+    # cache, rewriting binaries in place that other deployments' plan/apply may be executing:
+    # "text file busy". With it, init links the cached copy. Workspaces are throwaway and
+    # single-platform, so lock files holding only this platform's checksums are fine.
+    env["TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE"] = "true"
     identity = {
         "ARM_TENANT_ID": settings.azure_tenant_id,
         # The business unit's subscription when placement applies, else the platform default.
@@ -96,6 +89,16 @@ def _env(subscription_id: str | None = None) -> dict[str, str]:
             env["ARM_CLIENT_ID"] = settings.azure_managed_identity_client_id
     elif settings.azure_client_certificate_path:
         env["ARM_CLIENT_CERTIFICATE_PATH"] = str(settings.azure_client_certificate_path.resolve())
+    elif settings.azure_use_aks_workload_identity:
+        # The AKS pod webhook already put AZURE_CLIENT_ID, AZURE_TENANT_ID and
+        # AZURE_FEDERATED_TOKEN_FILE in this process's environment (passed through above via
+        # catalog.git_env); azurerm reads them itself once this flag is set. Fill ARM_CLIENT_ID/
+        # ARM_TENANT_ID from them only when no explicit setting already did.
+        env["ARM_USE_AKS_WORKLOAD_IDENTITY"] = "true"
+        if "ARM_CLIENT_ID" not in env and env.get("AZURE_CLIENT_ID"):
+            env["ARM_CLIENT_ID"] = env["AZURE_CLIENT_ID"]
+        if "ARM_TENANT_ID" not in env and env.get("AZURE_TENANT_ID"):
+            env["ARM_TENANT_ID"] = env["AZURE_TENANT_ID"]
     return env
 
 
@@ -106,22 +109,74 @@ def _first_error(output: str) -> str:
     return " ".join(text.split())[:800]
 
 
+def _killpg(pid: int, sig: int) -> None:
+    with contextlib.suppress(ProcessLookupError):  # already gone; nothing to signal
+        os.killpg(pid, sig)
+
+
+def _invoke(
+    command: list[str], workdir: Path, env: dict[str, str], deadline: float | None
+) -> subprocess.CompletedProcess:
+    proc = subprocess.Popen(
+        command,
+        cwd=workdir,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+        preexec_fn=_default_sigint if _PARENT_IGNORES_SIGINT else None,
+    )
+    try:
+        remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+        stdout, stderr = proc.communicate(timeout=remaining)
+        return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+    except subprocess.TimeoutExpired:
+        _killpg(proc.pid, signal.SIGINT)  # terraform stops gracefully and writes state
+        try:
+            proc.communicate(timeout=GRACE)
+        except subprocess.TimeoutExpired:
+            _killpg(proc.pid, signal.SIGKILL)
+            proc.communicate()  # reap
+        raise _DeadlineExceeded from None
+
+
 def _run(
-    deployment_id: str, *args: str, subscription_id: str | None = None, _unlock_once: bool = True
+    deployment_id: str,
+    *args: str,
+    subscription_id: str | None = None,
+    _unlock_once: bool = True,
+    safe_logs: bool = False,
+    deadline: float | None = None,
 ) -> str:
     workdir = deployment_dir(deployment_id) / "work"
-    with _CACHE.held(exclusive=args[0] == "init"):
-        result = subprocess.run(
-            [settings.terraform_bin, *args],
-            cwd=workdir,
-            env=_env(subscription_id),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    # `output -json` is returned to the caller, not logged: outputs live in the database.
-    logged = result.stderr if args[0] == "output" else result.stdout + result.stderr
     shown = " ".join(a for a in args if not a.startswith("-backend-config"))
+    command = [settings.terraform_bin, *args]
+    try:
+        if args[0] == "init":
+            # Only `init` fetches pattern modules from git, so only it needs the token.
+            # The wait for the lock counts against the deadline, and nothing has started yet if
+            # it runs out, so the phase fails cleanly rather than becoming uncertain.
+            wait = -1 if deadline is None else max(0.0, deadline - time.monotonic())
+            if not _INIT_LOCK.acquire(timeout=wait):
+                raise TerraformError(
+                    "terraform init exceeded its deadline waiting for the provider cache"
+                )
+            try:
+                result = _invoke(command, workdir, _env(subscription_id, token=True), deadline)
+            finally:
+                _INIT_LOCK.release()
+        else:
+            result = _invoke(command, workdir, _env(subscription_id), deadline)
+    except _DeadlineExceeded:
+        logs.append(deployment_id, f"$ terraform {shown}\nexit_code=timeout\n")
+        raise TerraformError(f"terraform {args[0]} exceeded its deadline") from None
+    # `output -json` is returned to the caller, not logged: outputs live in the database.
+    logged = result.stderr if args[0] in {"output", "show"} else result.stdout + result.stderr
+    if safe_logs:
+        # The operation activity exposes structured outcomes. Raw provider diagnostics may
+        # contain auth errors or values, so its persistent log contains command receipts only.
+        logged = f"exit_code={result.returncode}"
     logs.append(deployment_id, f"$ terraform {shown}\n{logged}\n")
     if result.returncode != 0:
         lock = lock_id(result.stderr)
@@ -161,11 +216,19 @@ def _backend_args(deployment_id: str) -> list[str]:
         config["use_oidc"] = "true"
     elif settings.azure_use_managed_identity:
         config["use_msi"] = "true"
+    elif settings.azure_use_aks_workload_identity:
+        config["use_aks_workload_identity"] = "true"
     return [f"-backend-config={k}={v}" for k, v in config.items()]
 
 
 def prepare(
-    deployment_id: str, source: str, variables: dict[str, Any], subscription_id: str | None = None
+    deployment_id: str,
+    source: str,
+    variables: dict[str, Any],
+    subscription_id: str | None = None,
+    *,
+    safe_logs: bool = False,
+    deadline: float | None = None,
 ) -> None:
     """Workspace with the pattern at its pinned commit, initialised against its state.
 
@@ -180,11 +243,27 @@ def prepare(
         shutil.rmtree(workdir, ignore_errors=True)
         workdir.mkdir(parents=True)
         fetch = ("init", "-no-color", "-backend=false", f"-from-module={source}")
-        _run(deployment_id, *fetch, subscription_id=subscription_id)
+        _run(
+            deployment_id,
+            *fetch,
+            subscription_id=subscription_id,
+            safe_logs=safe_logs,
+            _unlock_once=not safe_logs,
+            deadline=deadline,
+        )
         marker.write_text(source)
     (workdir / "terraform.tfvars.json").write_text(json.dumps(variables))
     backend = _backend_args(deployment_id) if catalog.uses_azurerm_backend(workdir) else []
-    _run(deployment_id, "init", "-no-color", *backend, subscription_id=subscription_id)
+    _run(
+        deployment_id,
+        "init",
+        "-no-color",
+        *backend,
+        subscription_id=subscription_id,
+        safe_logs=safe_logs,
+        _unlock_once=not safe_logs,
+        deadline=deadline,
+    )
 
 
 def _fingerprint(source: str, variables: dict[str, Any], subscription_id: str | None) -> str:

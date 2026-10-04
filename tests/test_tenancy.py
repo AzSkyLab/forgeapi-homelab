@@ -10,7 +10,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from app import db, terraform
-from app.main import app
+from app.legacy import app
 from app.models import State
 from app.settings import settings
 from tests.conftest import git
@@ -187,6 +187,20 @@ def test_pattern_page_hides_platform_inputs_and_limits_location(client):
     assert set(schema["properties"]) == {"name", "location", "api_key"}
 
 
+def test_malformed_selected_size_price_is_controlled_503(client, dispatched, tmp_path):
+    repo = tmp_path / "terraform-pattern-sized"
+    config = {**SIZING, "estimated_costs": {**SIZING["estimated_costs"], "small": None}}
+    (repo / "config.yaml").write_text(yaml.safe_dump(config))
+    git(repo, "add", "config.yaml")
+    git(repo, "commit", "-qm", "malformed selected size price")
+    git(repo, "tag", "v1.1.0")
+    response = deploy(client, version="v1.1.0")
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "invalid estimated cost configuration"
+    assert db.list_for(["finance"]) == []
+    assert dispatched == []
+
+
 def test_deployment_is_placed_and_injected_but_subscription_is_never_shown(client, dispatched):
     body = deploy(client).json()
     assert body["business_unit"] == "finance" and body["environment"] == "dev"
@@ -323,7 +337,9 @@ def test_easy_auth_header_supplies_identity_and_groups(monkeypatch, dispatched):
 def test_injected_values_and_target_subscription_reach_terraform(monkeypatch):
     seen = []
     real_env = terraform._env
-    monkeypatch.setattr(terraform, "_env", lambda sub=None: seen.append(sub) or real_env(sub))
+    monkeypatch.setattr(
+        terraform, "_env", lambda sub=None, token=False: seen.append(sub) or real_env(sub, token)
+    )
     deployment = db.create(
         "sized", {"name": "real"}, "v1.0.0", git_commit(), business_unit="finance",
         environment="dev", subscription_id=SUB_FIN_DEV, size="small",
@@ -441,7 +457,7 @@ def test_budgets_are_separate_per_business_unit_and_environment(client, monkeypa
 def _plan_report(deployment_id: str) -> dict:
     """What the API works out for an update of this deployment, without applying it."""
     from app import catalog
-    from app.main import _plan_request
+    from app.legacy import _plan_request
     from app.tenants import Caller
 
     d = db.get(deployment_id)

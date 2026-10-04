@@ -1,0 +1,41 @@
+description: Resource group with a private, versioned storage account (TLS 1.2, no public blobs) and a private container. Adds a private endpoint where the environment provides a subnet.
+category: storage
+components:
+  - Resource group
+  - Storage account (StorageV2, TLS 1.2, no public blob access)
+  - Private blob container
+  - Blob versioning and soft delete
+  - Private endpoint (only where the environment injects a subnet)
+use_cases:
+  - Application data or artifact storage
+  - Log or export drop zone
+  - Starting point for new Azure patterns
+
+# Monthly estimate in USD per size per environment, used for business-unit budgets.
+# Lookup order: estimated_costs.<size>.<environment>, then estimated_costs.<environment>,
+# then a single number. Sizes assume light usage; prd includes a private endpoint (~8 USD).
+estimated_costs:
+  small:
+    dev: 2
+    prd: 12
+  large:
+    dev: 10
+    prd: 40
+
+# sizing.<size>.<environment>.<variable>. A size is offered in an environment only if it has an
+# entry for it. Callers pick a size; they cannot set these variables themselves.
+sizing:
+  small:
+    dev:
+      replication_type: LRS
+      blob_retention_days: 7
+    prd:
+      replication_type: ZRS
+      blob_retention_days: 30
+  large:
+    dev:
+      replication_type: LRS
+      blob_retention_days: 14
+    prd:
+      replication_type: ZRS
+      blob_retention_days: 90

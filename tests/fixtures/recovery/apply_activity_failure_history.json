@@ -1,0 +1,368 @@
+{
+  "provenance": "Captured 2026-10-01 from a local-file planned operation via /v1/operations and explicit saved-digest execute. Current production workflow and uncertainty status writer ran with a test-only activity that claimed apply then raised a fixed ApplicationError before Terraform apply. This is controlled activity failure, not a real worker crash or older released worker. Only host-specific worker identities, sticky queue names and stack trace path prefixes normalized; no events or payloads fabricated.",
+  "workflow_id": "forgeapi-op_4d30eb4934f04a50882693b346e98e74-apply",
+  "history": {
+    "events": [
+      {
+        "eventId": "1",
+        "eventTime": "2026-10-02T01:54:05.058991632Z",
+        "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED",
+        "taskId": "1048689",
+        "workflowExecutionStartedEventAttributes": {
+          "workflowType": {
+            "name": "OperationPhaseWorkflow"
+          },
+          "taskQueue": {
+            "name": "forgeapi",
+            "kind": "TASK_QUEUE_KIND_NORMAL"
+          },
+          "input": {
+            "payloads": [
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "Im9wXzRkMzBlYjQ5MzRmMDRhNTA4ODI2OTNiMzQ2ZTk4ZTc0Ig=="
+              },
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "ImFwcGx5Ig=="
+              }
+            ]
+          },
+          "workflowTaskTimeout": "10s",
+          "originalExecutionRunId": "01a0fa51-9282-7f1f-a379-7001be554198",
+          "identity": "capture-worker",
+          "firstExecutionRunId": "01a0fa51-9282-7f1f-a379-7001be554198",
+          "attempt": 1,
+          "firstWorkflowTaskBackoff": "0s",
+          "workflowId": "forgeapi-op_4d30eb4934f04a50882693b346e98e74-apply",
+          "priority": {}
+        }
+      },
+      {
+        "eventId": "2",
+        "eventTime": "2026-10-02T01:54:05.059021614Z",
+        "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+        "taskId": "1048690",
+        "workflowTaskScheduledEventAttributes": {
+          "taskQueue": {
+            "name": "forgeapi",
+            "kind": "TASK_QUEUE_KIND_NORMAL"
+          },
+          "startToCloseTimeout": "10s",
+          "attempt": 1
+        }
+      },
+      {
+        "eventId": "3",
+        "eventTime": "2026-10-02T01:54:05.061934638Z",
+        "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+        "taskId": "1048695",
+        "workflowTaskStartedEventAttributes": {
+          "scheduledEventId": "2",
+          "identity": "capture-worker",
+          "requestId": "a5f2d66b-5233-4937-b620-2059b1a9ec3a",
+          "historySizeBytes": "378",
+          "workerVersion": {
+            "buildId": "a06b72c87589ac8c8f716a072f486033"
+          }
+        }
+      },
+      {
+        "eventId": "4",
+        "eventTime": "2026-10-02T01:54:05.064271885Z",
+        "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+        "taskId": "1048699",
+        "workflowTaskCompletedEventAttributes": {
+          "scheduledEventId": "2",
+          "startedEventId": "3",
+          "identity": "capture-worker",
+          "workerVersion": {
+            "buildId": "a06b72c87589ac8c8f716a072f486033"
+          },
+          "sdkMetadata": {
+            "coreUsedFlags": [
+              3,
+              1,
+              2
+            ],
+            "sdkName": "temporal-python",
+            "sdkVersion": "1.33.0"
+          },
+          "meteringMetadata": {}
+        }
+      },
+      {
+        "eventId": "5",
+        "eventTime": "2026-10-02T01:54:05.064300227Z",
+        "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+        "taskId": "1048700",
+        "activityTaskScheduledEventAttributes": {
+          "activityId": "1",
+          "activityType": {
+            "name": "run_operation_phase"
+          },
+          "taskQueue": {
+            "name": "forgeapi",
+            "kind": "TASK_QUEUE_KIND_NORMAL"
+          },
+          "header": {},
+          "input": {
+            "payloads": [
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "Im9wXzRkMzBlYjQ5MzRmMDRhNTA4ODI2OTNiMzQ2ZTk4ZTc0Ig=="
+              },
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "ImFwcGx5Ig=="
+              }
+            ]
+          },
+          "scheduleToCloseTimeout": "0s",
+          "scheduleToStartTimeout": "0s",
+          "startToCloseTimeout": "1800s",
+          "heartbeatTimeout": "0s",
+          "workflowTaskCompletedEventId": "4",
+          "retryPolicy": {
+            "initialInterval": "1s",
+            "backoffCoefficient": 2.0,
+            "maximumInterval": "100s",
+            "maximumAttempts": 1
+          },
+          "useWorkflowBuildId": true,
+          "priority": {}
+        }
+      },
+      {
+        "eventId": "6",
+        "eventTime": "2026-10-02T01:54:05.065229072Z",
+        "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+        "taskId": "1048707",
+        "activityTaskStartedEventAttributes": {
+          "scheduledEventId": "5",
+          "identity": "capture-worker",
+          "requestId": "2c4d76a5-a5b7-46f2-8de0-024336e95c74",
+          "attempt": 1,
+          "workerVersion": {
+            "buildId": "a06b72c87589ac8c8f716a072f486033"
+          }
+        }
+      },
+      {
+        "eventId": "7",
+        "eventTime": "2026-10-02T01:54:05.067577440Z",
+        "eventType": "EVENT_TYPE_ACTIVITY_TASK_FAILED",
+        "taskId": "1048708",
+        "activityTaskFailedEventAttributes": {
+          "failure": {
+            "message": "controlled apply activity failure",
+            "stackTrace": "  File \"<capture-root>/.venv/lib/python3.12/site-packages/temporalio/worker/_activity.py\", line 351, in _handle_start_activity_task\n    result = await self._execute_activity(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n  File \"<capture-root>/.venv/lib/python3.12/site-packages/temporalio/worker/_activity.py\", line 681, in _execute_activity\n    return await impl.execute_activity(input)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n  File \"<capture-root>/.venv/lib/python3.12/site-packages/temporalio/worker/_activity.py\", line 889, in execute_activity\n    return await input.fn(*input.args)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n  File \"<capture-root>/tests/_capture_apply_history.py\", line 51, in controlled_apply_failure\n    raise ApplicationError(\"controlled apply activity failure\")\n",
+            "applicationFailureInfo": {}
+          },
+          "scheduledEventId": "5",
+          "startedEventId": "6",
+          "identity": "capture-worker",
+          "retryState": "RETRY_STATE_MAXIMUM_ATTEMPTS_REACHED"
+        }
+      },
+      {
+        "eventId": "8",
+        "eventTime": "2026-10-02T01:54:05.067608352Z",
+        "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+        "taskId": "1048709",
+        "workflowTaskScheduledEventAttributes": {
+          "taskQueue": {
+            "name": "capture-sticky-queue",
+            "kind": "TASK_QUEUE_KIND_STICKY",
+            "normalName": "forgeapi"
+          },
+          "startToCloseTimeout": "10s",
+          "attempt": 1
+        }
+      },
+      {
+        "eventId": "9",
+        "eventTime": "2026-10-02T01:54:05.068217671Z",
+        "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+        "taskId": "1048713",
+        "workflowTaskStartedEventAttributes": {
+          "scheduledEventId": "8",
+          "identity": "capture-worker",
+          "requestId": "25bd2952-9c2d-4ff6-9825-8deedfef7ff4",
+          "historySizeBytes": "2042",
+          "workerVersion": {
+            "buildId": "a06b72c87589ac8c8f716a072f486033"
+          }
+        }
+      },
+      {
+        "eventId": "10",
+        "eventTime": "2026-10-02T01:54:05.069884545Z",
+        "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+        "taskId": "1048717",
+        "workflowTaskCompletedEventAttributes": {
+          "scheduledEventId": "8",
+          "startedEventId": "9",
+          "identity": "capture-worker",
+          "workerVersion": {
+            "buildId": "a06b72c87589ac8c8f716a072f486033"
+          },
+          "sdkMetadata": {},
+          "meteringMetadata": {}
+        }
+      },
+      {
+        "eventId": "11",
+        "eventTime": "2026-10-02T01:54:05.069909377Z",
+        "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+        "taskId": "1048718",
+        "activityTaskScheduledEventAttributes": {
+          "activityId": "2",
+          "activityType": {
+            "name": "mark_operation_uncertain"
+          },
+          "taskQueue": {
+            "name": "forgeapi",
+            "kind": "TASK_QUEUE_KIND_NORMAL"
+          },
+          "header": {},
+          "input": {
+            "payloads": [
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "Im9wXzRkMzBlYjQ5MzRmMDRhNTA4ODI2OTNiMzQ2ZTk4ZTc0Ig=="
+              },
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "ImFwcGx5Ig=="
+              }
+            ]
+          },
+          "scheduleToCloseTimeout": "0s",
+          "scheduleToStartTimeout": "0s",
+          "startToCloseTimeout": "30s",
+          "heartbeatTimeout": "0s",
+          "workflowTaskCompletedEventId": "10",
+          "retryPolicy": {
+            "initialInterval": "1s",
+            "backoffCoefficient": 2.0,
+            "maximumInterval": "100s"
+          },
+          "useWorkflowBuildId": true,
+          "priority": {}
+        }
+      },
+      {
+        "eventId": "12",
+        "eventTime": "2026-10-02T01:54:05.070617503Z",
+        "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+        "taskId": "1048724",
+        "activityTaskStartedEventAttributes": {
+          "scheduledEventId": "11",
+          "identity": "capture-worker",
+          "requestId": "b1cbbd52-c4ef-46ed-a556-87c24f910c76",
+          "attempt": 1,
+          "workerVersion": {
+            "buildId": "a06b72c87589ac8c8f716a072f486033"
+          }
+        }
+      },
+      {
+        "eventId": "13",
+        "eventTime": "2026-10-02T01:54:05.072048448Z",
+        "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+        "taskId": "1048725",
+        "activityTaskCompletedEventAttributes": {
+          "result": {
+            "payloads": [
+              {
+                "metadata": {
+                  "encoding": "YmluYXJ5L251bGw="
+                }
+              }
+            ]
+          },
+          "scheduledEventId": "11",
+          "startedEventId": "12",
+          "identity": "capture-worker"
+        }
+      },
+      {
+        "eventId": "14",
+        "eventTime": "2026-10-02T01:54:05.072054178Z",
+        "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+        "taskId": "1048726",
+        "workflowTaskScheduledEventAttributes": {
+          "taskQueue": {
+            "name": "capture-sticky-queue",
+            "kind": "TASK_QUEUE_KIND_STICKY",
+            "normalName": "forgeapi"
+          },
+          "startToCloseTimeout": "10s",
+          "attempt": 1
+        }
+      },
+      {
+        "eventId": "15",
+        "eventTime": "2026-10-02T01:54:05.072636215Z",
+        "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+        "taskId": "1048730",
+        "workflowTaskStartedEventAttributes": {
+          "scheduledEventId": "14",
+          "identity": "capture-worker",
+          "requestId": "89c2f43c-bd52-42cd-9541-9883cb803888",
+          "historySizeBytes": "2772",
+          "workerVersion": {
+            "buildId": "a06b72c87589ac8c8f716a072f486033"
+          }
+        }
+      },
+      {
+        "eventId": "16",
+        "eventTime": "2026-10-02T01:54:05.074242814Z",
+        "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+        "taskId": "1048734",
+        "workflowTaskCompletedEventAttributes": {
+          "scheduledEventId": "14",
+          "startedEventId": "15",
+          "identity": "capture-worker",
+          "workerVersion": {
+            "buildId": "a06b72c87589ac8c8f716a072f486033"
+          },
+          "sdkMetadata": {},
+          "meteringMetadata": {}
+        }
+      },
+      {
+        "eventId": "17",
+        "eventTime": "2026-10-02T01:54:05.074262265Z",
+        "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED",
+        "taskId": "1048735",
+        "workflowExecutionCompletedEventAttributes": {
+          "result": {
+            "payloads": [
+              {
+                "metadata": {
+                  "encoding": "YmluYXJ5L251bGw="
+                }
+              }
+            ]
+          },
+          "workflowTaskCompletedEventId": "16"
+        }
+      }
+    ]
+  }
+}

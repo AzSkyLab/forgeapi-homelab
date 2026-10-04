@@ -1,0 +1,127 @@
+# One pod: the API and its Temporal worker share a managed-disk volume (the SQLite ledger and
+# saved Terraform plans must sit on one local disk -- see AGENTS.md / docs/agent-architecture.md).
+# replicas stays at 1: a second replica would mean a second disk, which this milestone does not
+# support. RollingUpdate with one replica means a brief gap (old pod terminates before the new
+# one is Ready) on every rollout; there is no hot standby. Accept that, or stop traffic during
+# upgrades, until a shared-disk-safe multi-replica design exists.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: forgeapi
+  labels:
+    app: forgeapi
+spec:
+  serviceName: forgeapi
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: forgeapi
+  template:
+    metadata:
+      labels:
+        app: forgeapi
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: forgeapi
+      # automountServiceAccountToken is left at its default (true): the azure-workload-identity
+      # webhook adds the federated-token projected volume alongside the normal SA token
+      # projection, keyed off this pod's "azure.workload.identity/use" label and the service
+      # account's annotation. Setting this to false would also suppress that webhook mount.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/OWNER/forgeapi:TAG
+          command: [uvicorn, "app.main:app", --host, "0.0.0.0", --port, "8000"]
+          ports:
+            - {name: http, containerPort: 8000}
+          envFrom:
+            - configMapRef: {name: forgeapi-config}
+          env:
+            # Tenancy mapping (docs/tenancy.md): optional, single-tenant if unset/absent.
+            - name: FORGEAPI_TENANTS_YAML
+              valueFrom:
+                secretKeyRef: {name: forgeapi-tenants, key: tenants.yaml, optional: true}
+            # Read access to private pattern repos when resolving catalog metadata (app/catalog.py
+            # git_env default token=True runs here too, not just in the worker's terraform init).
+            - name: FORGEAPI_GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef: {name: forgeapi-github-app, key: app-id, optional: true}
+            - name: FORGEAPI_GITHUB_APP_INSTALLATION_ID
+              valueFrom:
+                secretKeyRef: {name: forgeapi-github-app, key: installation-id, optional: true}
+            - name: FORGEAPI_GITHUB_APP_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef: {name: forgeapi-github-app, key: private-key, optional: true}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8000}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8000}
+            periodSeconds: 15
+            timeoutSeconds: 3
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 512Mi}
+        - name: worker
+          image: ghcr.io/OWNER/forgeapi:TAG
+          command: [python, -m, app.worker]
+          envFrom:
+            - configMapRef: {name: forgeapi-config}
+          env:
+            # terraform init fetches the pattern module from git; the same App credentials as
+            # the api container (least surprise: either both have GitHub access or neither does).
+            - name: FORGEAPI_GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef: {name: forgeapi-github-app, key: app-id, optional: true}
+            - name: FORGEAPI_GITHUB_APP_INSTALLATION_ID
+              valueFrom:
+                secretKeyRef: {name: forgeapi-github-app, key: installation-id, optional: true}
+            - name: FORGEAPI_GITHUB_APP_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef: {name: forgeapi-github-app, key: private-key, optional: true}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+          # No HTTP endpoint to probe; Kubernetes restarts this container only if the process
+          # itself exits (app/worker.py has no built-in self-check beyond that).
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {memory: 1Gi}
+      volumes:
+        # HOME=/tmp (set in the Dockerfile) and any Terraform/git scratch files land here. uv is
+        # a build-time-only tool in this image (dependencies are installed during `docker build`,
+        # not at container start), so no uv cache needs to be writable at runtime. The Terraform
+        # plugin cache and all workspaces live under /data (app/terraform.py _env/deployment_dir),
+        # which is the PVC below, not this emptyDir.
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: managed-csi
+        resources:
+          requests:
+            storage: 32Gi

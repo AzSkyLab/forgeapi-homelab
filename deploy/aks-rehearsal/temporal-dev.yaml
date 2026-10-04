@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Namespace
+metadata: {name: temporal}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: temporal-frontend, namespace: temporal}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: temporal}}
+  template:
+    metadata: {labels: {app: temporal}}
+    spec:
+      containers:
+        - name: temporal
+          image: temporalio/temporal@sha256:ad4c82c97bd12b417d1ea942610dbcd511afb250c4d5ed26c694009533df447e
+          args: ["server", "start-dev", "--ip", "0.0.0.0", "--headless", "--namespace", "default"]
+          ports: [{containerPort: 7233}]
+          readinessProbe: {tcpSocket: {port: 7233}, periodSeconds: 3}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: temporal-frontend, namespace: temporal}
+spec:
+  selector: {app: temporal}
+  ports: [{port: 7233, targetPort: 7233}]

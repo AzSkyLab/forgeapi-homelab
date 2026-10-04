@@ -1,0 +1,37 @@
+# Replace the client-namespace label below with whatever namespace(s) actually call this API
+# (an API gateway, an agent runtime, etc). Egress to cloud/GitHub endpoints cannot be narrowed
+# to specific IPs here (Azure/AWS/GCP and github.com addresses are not stable/enumerable), so it
+# is left open on 443; narrow it with your platform's egress controls if you need more than this.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: forgeapi
+spec:
+  podSelector:
+    matchLabels:
+      app: forgeapi
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "<CLIENT_NAMESPACE_PLACEHOLDER>"
+      ports:
+        - {protocol: TCP, port: 8000}
+  egress:
+    # DNS
+    - to: []
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # Temporal, on the same cluster per the engineer's hosting decision.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "<TEMPORAL_NAMESPACE_PLACEHOLDER>"
+      ports:
+        - {protocol: TCP, port: 7233}
+    # Cloud provider APIs, Entra and GitHub: all reached over HTTPS, destinations not enumerable.
+    - to: []
+      ports:
+        - {protocol: TCP, port: 443}

@@ -1,0 +1,56 @@
+name: pattern-ci
+
+# No secrets and no cloud access: formatting, init without a backend, validate, and the
+# ForgeAPI pattern checker (static, never plans or applies).
+on:
+  pull_request:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  # Placeholder: set to the ForgeAPI repository as owner/name (repository variable), and pin
+  # FORGEAPI_REF to a tag or commit. The checker is checked out next to this pattern.
+  FORGEAPI_REPO: ${{ vars.FORGEAPI_REPO }}
+  FORGEAPI_REF: main
+  CLOUD: aws
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pattern
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.5"
+          terraform_wrapper: false
+
+      - name: Format
+        run: terraform -chdir=pattern fmt -check -recursive
+
+      - name: Init (no backend)
+        run: terraform -chdir=pattern init -backend=false -input=false
+
+      - name: Validate
+        run: terraform -chdir=pattern validate
+
+      - name: Check out ForgeAPI
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FORGEAPI_REPO }}
+          ref: ${{ env.FORGEAPI_REF }}
+          path: forgeapi
+          # A private ForgeAPI repo needs a read-only token here (for example a deploy key or
+          # GitHub App token). Leave unset when the repo is readable by this workflow.
+          # token: ${{ secrets.FORGEAPI_READ_TOKEN }}
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: ForgeAPI pattern check
+        working-directory: forgeapi
+        run: uv run python -m app.pattern_check "$GITHUB_WORKSPACE/pattern" --cloud "$CLOUD" --terraform

@@ -1,0 +1,3 @@
+patterns:
+  local-file:
+    local: /app/examples/local-file

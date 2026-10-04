@@ -16,8 +16,14 @@ def estimated_cost(
 ) -> float | None:
     """`estimated_costs.<size>.<environment>`, else `.<environment>`, else a single number."""
     costs = (config or {}).get("estimated_costs")
+    selected = None
+    if isinstance(costs, dict) and size and size in costs:
+        entry = costs[size]
+        if not isinstance(entry, dict):
+            raise TenancyError(503, "invalid estimated cost configuration")
+        selected = entry.get(environment)
     for candidate in (
-        costs.get(size, {}).get(environment) if isinstance(costs, dict) and size else None,
+        selected,
         costs.get(environment) if isinstance(costs, dict) else None,
         costs,
     ):

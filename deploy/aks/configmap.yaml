@@ -1,0 +1,34 @@
+# Non-secret FORGEAPI_* settings. Secrets (tenants mapping, GitHub App key) are separate
+# Secrets the operator creates themselves; see README.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: forgeapi-config
+data:
+  FORGEAPI_AUTH_MODE: "entra"
+  FORGEAPI_ENTRA_TENANT_ID: "<ENTRA_TENANT_ID_PLACEHOLDER>"
+  FORGEAPI_ENTRA_AUDIENCE: "<ENTRA_AUDIENCE_PLACEHOLDER>"
+  # Temporal runs on this same AKS cluster per the engineer's hosting decision; adjust the
+  # namespace/service name to match that deployment.
+  FORGEAPI_TEMPORAL_ADDRESS: "temporal-frontend.temporal.svc.cluster.local:7233"
+  FORGEAPI_TEMPORAL_NAMESPACE: "default"
+  FORGEAPI_TASK_QUEUE: "forgeapi"
+  FORGEAPI_DATA_DIR: "/data"
+  # A planned operation not executed within this many hours expires; submit a new intent.
+  FORGEAPI_PLAN_MAX_AGE_HOURS: "24"
+  # AKS workload identity (app/terraform.py _env/_backend_args): the pod webhook injects
+  # AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_FEDERATED_TOKEN_FILE; this tells the azurerm provider
+  # and state backend to use them. Mutually exclusive with the other Azure identity settings
+  # (FORGEAPI_AZURE_FEDERATED_CLIENT_ID, FORGEAPI_AZURE_USE_MANAGED_IDENTITY,
+  # FORGEAPI_AZURE_CLIENT_CERTIFICATE_PATH) -- leave those unset.
+  FORGEAPI_AZURE_USE_AKS_WORKLOAD_IDENTITY: "true"
+  # Off by default: this base assumes Temporal is reachable in-cluster without TLS. To turn it
+  # on, set this true and mount the PEM files below (e.g. from a Secret) at the referenced
+  # paths; both temporal_tls_cert_path and temporal_tls_key_path must be set together, or
+  # neither (see app/settings.py, tests/test_temporal_tls.py).
+  FORGEAPI_TEMPORAL_TLS: "false"
+  # FORGEAPI_TEMPORAL_TLS: "true"
+  # FORGEAPI_TEMPORAL_TLS_CA_PATH: "/etc/forgeapi/temporal-tls/ca.pem"
+  # FORGEAPI_TEMPORAL_TLS_CERT_PATH: "/etc/forgeapi/temporal-tls/client.pem"
+  # FORGEAPI_TEMPORAL_TLS_KEY_PATH: "/etc/forgeapi/temporal-tls/client.key"
+  # FORGEAPI_TEMPORAL_TLS_SERVER_NAME: "temporal-frontend.temporal.svc.cluster.local"

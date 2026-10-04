@@ -1,0 +1,26 @@
+{
+  "business_units": [],
+  "contract": "agent-v1",
+  "links": {
+    "openapi": "/openapi.json",
+    "operations": "/operations",
+    "patterns": "/patterns/{name}",
+    "submit": "/operations",
+    "validate": "/intents/validate"
+  },
+  "patterns": [
+    "demo"
+  ],
+  "semantics": {
+    "dispatch": "202 acknowledges queued work"
+  },
+  "workflow": [
+    "describe_pattern",
+    "validate_intent",
+    "submit_intent",
+    "poll_until_planned",
+    "inspect_changes",
+    "execute_exact_plan",
+    "poll_outcome"
+  ]
+}

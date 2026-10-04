@@ -1,0 +1,119 @@
+# Work-cloud simulation hosted in the existing guest on pve-desktop.
+# Apply the bootstrap/engine scripts as ConfigMap forgeapi-emulator-scripts first.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forgeapi-emulator
+  namespace: forgeapi-emulator
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: forgeapi-emulator
+  template:
+    metadata:
+      labels:
+        app: forgeapi-emulator
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k3s-server-01
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+      initContainers:
+        - name: catalog
+          image: forgeapi:floci-work-demo
+          imagePullPolicy: Never
+          command: [python, /scripts/bootstrap.py]
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      containers:
+        - name: api
+          image: forgeapi:floci-work-demo
+          imagePullPolicy: Never
+          command: [uvicorn, 'app.main:app', --host, 127.0.0.1, --port, '8000']
+          env:
+            - {name: FORGEAPI_DATA_DIR, value: /data}
+            - {name: FORGEAPI_CATALOG_PATH, value: /data/emulator-patterns.yaml}
+            - {name: FORGEAPI_TASK_QUEUE, value: forgeapi-emulator}
+            - {name: AWS_EC2_METADATA_DISABLED, value: 'true'}
+            # Lab-only: no auth mode is configured for this emulator deployment.
+            - {name: FORGEAPI_ALLOW_UNAUTHENTICATED_REMOTE, value: 'true'}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          readinessProbe:
+            exec:
+              command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2)"]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}
+        - name: engine
+          image: forgeapi:floci-work-demo
+          imagePullPolicy: Never
+          command: [python, /scripts/engine.py]
+          env:
+            - {name: FORGEAPI_DATA_DIR, value: /data}
+            - {name: FORGEAPI_CATALOG_PATH, value: /data/emulator-patterns.yaml}
+            - {name: FORGEAPI_TASK_QUEUE, value: forgeapi-emulator}
+            - {name: AWS_EC2_METADATA_DISABLED, value: 'true'}
+            - {name: PORT, value: '8233'}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+          readinessProbe:
+            tcpSocket: {port: 7233}
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 1536Mi}
+        - name: azure
+          image: floci/floci-az@sha256:3a71953fbc0940aa33bbc1c5e88211a320b66812c0840831a9f8558d3d3521c5
+          volumeMounts:
+            - {name: azure-data, mountPath: /app/data}
+          env:
+            - {name: FLOCI_AZ_TLS_ENABLED, value: 'true'}
+            - {name: FLOCI_AZ_FUNCTIONS_ENABLED, value: 'false'}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}
+        - name: aws
+          image: floci/floci@sha256:f5aa8c18302cedb4f2385f5c4e455b3efc77fee6bf7b6e5d1712b2817ba102db
+          volumeMounts:
+            - {name: aws-data, mountPath: /app/data}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}
+        - name: gcp
+          image: floci/floci-gcp@sha256:ea29a53b34d04ba05240cdc6833608e43ae2b0a67849e5b97f01a7224e1138ea
+          volumeMounts:
+            - {name: gcp-data, mountPath: /app/data}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}
+      volumes:
+        - {name: azure-data, emptyDir: {}}
+        - {name: aws-data, emptyDir: {}}
+        - {name: gcp-data, emptyDir: {}}
+        - name: data
+          hostPath:
+            path: /var/lib/forgeapi-emulator
+            type: Directory
+        - name: scripts
+          configMap:
+            name: forgeapi-emulator-scripts
+---
+# Access is through SSH and kubectl port-forward, with no public/LAN Service or Ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: private-emulator
+  namespace: forgeapi-emulator
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress: []

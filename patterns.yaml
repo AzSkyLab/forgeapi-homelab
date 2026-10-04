@@ -3,6 +3,7 @@
 #   repo: host/org/name
 #   path: sub-directory of the root module, if not the repo root
 #   default_version: tag used when a request names no version. Omit to follow the newest tag.
+#   cloud: azure|aws|gcp selects platform-owned environment targets; see docs/tenancy.md.
 patterns:
   key-vault:
     repo: github.com/AzSkyLab/terraform-azurerm-key-vault

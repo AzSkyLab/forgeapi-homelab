@@ -1,0 +1,32 @@
+# Local rehearsal only: applies the real deploy/aks base to a throwaway cluster (e.g. kind)
+# with a locally built image, the cluster's default storage class, no auth, and the example
+# local-file pattern. Never use for a real environment.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: forgeapi
+resources:
+  - ../aks
+images:
+  - name: ghcr.io/OWNER/forgeapi
+    newName: forgeapi
+    newTag: rehearsal
+configMapGenerator:
+  - name: forgeapi-rehearsal-catalog
+    files: [patterns.yaml]
+patches:
+  - target: {kind: ConfigMap, name: forgeapi-config}
+    patch: |-
+      - {op: replace, path: /data/FORGEAPI_AUTH_MODE, value: "none"}
+      - {op: add, path: /data/FORGEAPI_CATALOG_PATH, value: /etc/forgeapi/catalog/patterns.yaml}
+  - target: {kind: StatefulSet, name: forgeapi}
+    patch: |-
+      - {op: replace, path: /spec/volumeClaimTemplates/0/spec/storageClassName, value: standard}
+      - {op: add, path: /spec/template/spec/volumes/-, value: {name: catalog, configMap: {name: forgeapi-rehearsal-catalog}}}
+      - {op: add, path: /spec/template/spec/containers/0/volumeMounts/-, value: {name: catalog, mountPath: /etc/forgeapi/catalog, readOnly: true}}
+      - {op: add, path: /spec/template/spec/containers/1/volumeMounts/-, value: {name: catalog, mountPath: /etc/forgeapi/catalog, readOnly: true}}
+      - {op: add, path: /spec/template/spec/containers/0/imagePullPolicy, value: Never}
+      - {op: add, path: /spec/template/spec/containers/1/imagePullPolicy, value: Never}
+  - target: {kind: NetworkPolicy, name: forgeapi}
+    patch: |-
+      - {op: replace, path: "/spec/ingress/0/from/0/namespaceSelector/matchLabels/kubernetes.io~1metadata.name", value: forgeapi-clients}
+      - {op: replace, path: "/spec/egress/1/to/0/namespaceSelector/matchLabels/kubernetes.io~1metadata.name", value: temporal}
