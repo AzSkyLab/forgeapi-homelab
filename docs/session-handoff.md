@@ -1,9 +1,8 @@
 # Session handoff: continuous API improvement
 
-**Current as of:** 2026-10-04. Work through the AKS rehearsal is committed on local branch
-`platform-2026-10` (not pushed; see `git log`). This session's work-move prep (Temporal mTLS and
-workload-identity tests, docs) is **uncommitted** on that branch; preserve it. Nothing has been
-pushed, published or deployed. The engineer wants consecutive bounded milestones without
+**Current as of:** 2026-10-04. All work is committed and pushed on branch `platform-2026-10`
+(`origin/platform-2026-10`); the engineer asked for no PRs. Nothing has been published or
+deployed. The engineer wants consecutive bounded milestones without
 questions; record decisions in progress. The current state is a verified checkpoint: no test
 run, emulator or agent is pending.
 
@@ -28,7 +27,7 @@ run, emulator or agent is pending.
 > afterwards (zero containers/networks). Local Terraform is 1.15.9; the platform image uses 1.16.5
 > (copy it out of the local forgeapi image into the scratchpad). Always keep the status page current:
 > https://claude.ai/artifact/1CvrDzH8fYX9ZCbTt6FAYj (republish after every milestone).
-> State: the work is on branch `platform-2026-10` (see git log; newest tests may be uncommitted);
+> State: the work is pushed on branch `platform-2026-10` (see git log);
 > default suite 1181 passed, 31 optional skips (Floci + opt-in real Graph). Every feature needs fast tests plus proof through the real stack (HTTP API →
 > real Temporal → app.worker.build_worker → Terraform → Floci, with independent emulator readbacks);
 > never call a skipped or unrun check passed. Don't ask me questions; make reasonable decisions,
