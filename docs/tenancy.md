@@ -1,4 +1,94 @@
-# Placement and access: business units
+# Multi-cloud placement for the operation API
+
+Current as of: 2026-10-02. The rules below apply to `app.main:app` (`agent-v1`).
+
+A trusted catalog entry declares `cloud: azure`, `cloud: aws`, or `cloud: gcp`. An agent
+chooses the pattern and its business unit/environment. The platform supplies the cloud
+identity and region from the mapping; neither is a request field. The pattern description
+returns its cloud and hides injected variables from the JSON schema.
+
+```yaml
+# patterns.yaml — repositories remain independently versioned and commit-pinned
+patterns:
+  object-storage:
+    repo: github.com/example/terraform-storage
+    cloud: aws
+
+# tenants.yaml — private, platform-owned configuration
+business_units:
+  finance:
+    groups: [finance-developers]
+    patterns: [object-storage]
+    environments:
+      dev:
+        targets:
+          azure: {subscription_id: "<subscription>", region: eastus}
+          aws: {aws_account_id: "<account>", region: us-east-1}
+          gcp: {project_id: "<project>", region: us-central1}
+```
+
+Each cloud target has exactly its identifier and `region`, both nonempty strings. A pattern
+must declare those two Terraform variables. They are injected after other platform inputs,
+removed from the caller schema, and caller overrides return 422. A missing or malformed target,
+a missing pattern variable, or a pattern without `cloud` in an environment with targets fails
+closed with 503. Region is fixed by this target in this milestone. Legacy subscription-only
+mappings and catalog entries without a cloud continue to work as before.
+
+**Provider contract:** trusted Azure patterns wire `subscription_id` into the provider and
+`region` into resource location; GCP patterns wire `project_id` and `region` into the provider;
+AWS patterns wire `region` and `allowed_account_ids = [var.aws_account_id]` into the provider.
+The AWS executor identity selects its account; the supplied ID is an account guard, not a
+credential or an assume-role mechanism. The API checks variable declarations, not arbitrary
+Terraform semantics. Review the trusted module's provider wiring before registration.
+
+The operation and resource store their cloud/target privately. The same resource cannot move
+between targets. Execution, update and destroy recheck the current mapping and catalog cloud;
+a changed target returns 409 without dispatch. Restore the authorized mapping or perform an
+explicit operator-managed migration before resuming. An already dispatched activity uses its
+accepted target; config changes cannot revoke work that has already started. Sensitive outputs
+and outputs containing a target identifier are withheld; only their names are exposed.
+
+New Terraform plan summaries are also checked for known placement identifiers. A resource
+address containing an injected target ID causes a generic planning failure before public
+changes or an executable digest are saved. Use non-sensitive `for_each` keys in pattern repos.
+Private placement data remains available to execution; historical summaries are not rewritten.
+
+`POST /operations` and explicit digest execution retain the existing Temporal run-once rules.
+Audit remains append-only, and BU membership gates reads while environment membership gates
+changes. Budgets reserve atomically in SQLite. No real AWS/GCP credential selection or workload
+identity is introduced by this placement milestone.
+
+Resolved numeric cost estimates must be finite and nonnegative. A selected `budget_monthly`
+must be a finite nonnegative number, excluding booleans; omitted/None means unlimited and zero
+is valid. Invalid numeric configuration receives sanitized 503 before operation acceptance.
+An environment with a budget still refuses a missing estimate with 403. Existing cost selection
+and fallback remain unchanged. These operation-policy checks do not rewrite legacy settings
+or historical cost records.
+
+A present selected `estimated_costs.<size>` entry must be a mapping; null, scalar, boolean
+or list entries return fixed 503. Missing sizes retain environment/global fallback, and
+requests without a size ignore unrelated size entries. Valid selection is unchanged.
+The shared resolver also returns controlled 503 for these malformed legacy requests.
+
+New admissions validate every contributing stored estimate and the aggregate before budget
+arithmetic. Invalid accounting returns sanitized 503 without acceptance or dispatch. Legacy
+rows are read without modification. Validation-only can still succeed when operation-ledger
+accounting is invalid: its transactional reservation check runs on submission. Exact-key replay
+and destroy remain available. Stored NULL counts as zero; original NaN/boolean types already
+normalized by SQLite cannot be reconstructed.
+
+
+The storage examples use only Floci and dummy identifiers. Verified patterns: Azure Storage
+account plus private blob container and supporting resource group; AWS S3 bucket with account
+guard; GCP storage bucket. Deployment: [placement demo](../deploy/emulator-placement/README.md).
+
+---
+
+# Legacy deployment API placement reference
+
+The following documents `app.legacy:app` and its `/deployments` routes. Its retry, discovery
+and budget limitations do not describe the operation API above.
+
 
 **Goal:** callers say *what* they want; the platform decides *where* it goes and *whether they may*. A caller never supplies or sees a subscription ID, network ID or cost centre. Granting a team access to the API **is** adding them to the mapping.
 
@@ -65,4 +155,18 @@ Limits: estimates are not bills; two simultaneous requests can both pass the che
 
 ## Not in scope yet
 
-Per-pattern version limits per BU; deployment counts, per-pattern caps and expiry; actual-spend reporting; approval steps for prd; an admin API for the mapping. (The audit trail now exists: [audit.md](audit.md).)
+Per-pattern version limits per BU; deployment counts, per-pattern caps and expiry; actual-spend reporting; approval steps for prd. (An operator admin API and portal for teams now exist, with `FORGEAPI_TENANTS_SOURCE=db`; see work-deployment.md. The audit trail now exists: [audit.md](audit.md).)
+
+## Guardrails
+
+An environment may add `protected_resource_types` (Terraform types that a plan may not delete
+or replace there) and `allow_destroy: false` (no destroy intents there). Both are enforced by
+the API: protected types when the plan is executed, destroy at submission. See
+`tenants.example.yaml` and [the architecture](agent-architecture.md).
+
+## Operators
+
+Top-level `operators` lists Entra groups whose members may resolve an `uncertain` operation in
+any business unit through `POST /operations/{id}/reconcile`. It grants nothing else: no reads
+beyond their own units, no deploys. Without a tenant mapping, the caller who created the
+operation may reconcile it. See [the architecture](agent-architecture.md).

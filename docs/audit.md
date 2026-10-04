@@ -31,3 +31,16 @@ Not recorded: reads that were allowed, catalog browsing, and **dry runs** (they 
 ## Storage
 
 Follows the deployment store: an `events` table in SQLite locally; hosted, a `<table>events` table in the same storage account (partitioned by business unit), covered by the existing Table Data role. No retention or export policy exists yet.
+
+## Team administration
+
+With `FORGEAPI_TENANTS_SOURCE=db`, every `/admin/teams` write records `accepted` inside the same
+transaction as the change (action `team.create|update|revert|archive|unarchive|import <name>
+r<revision>`), and refusals record `refused` (`team.<action> <name>`). Event detail is the team
+name and revision only — never target IDs. Team revisions are a separate append-only table
+(database triggers abort UPDATE/DELETE) holding who, when, why and the full document.
+
+Refusals added after the 2026-10-04 review: `placement_stale` (a team changed between
+validation and acceptance), `team_archived` (new work on an archived team at execute),
+`app_member`, `requester_access_revoked`, import `revision_stale`/`expected_revisions_required`.
+The drift sweep records at most one refused event per resource per interval.

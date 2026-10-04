@@ -1,4 +1,6 @@
-# FastAPI rewrite plan
+# FastAPI rewrite plan (historical)
+
+**Superseded 2026-09-30:** the engineer requested a full agent-first architecture replacement. New work follows [agent-architecture.md](agent-architecture.md); evidence and next milestone are in [progress.md](progress.md). The engineer selected Temporal for the new asynchronous API too; the deterministic-workflow and run-once Terraform activity rules remain in force.
 
 **Branch:** `fastapi-rewrite`. **Status:** plan approved 2026-09-20; wipe executed; see [progress](progress.md) for the current milestone. `main` keeps the Go implementation and all its evidence.
 

@@ -1,118 +1,319 @@
-# forgeapi
+# ForgeAPI: infrastructure requests with an explicit plan gate
 
-Minimal API that runs Terraform patterns as Temporal jobs. Python/FastAPI rewrite; the earlier Go implementation lives on `main` and its docs are in `docs/archive-go/`.
+ForgeAPI lets an agent request approved infrastructure through HTTP, inspect a saved Terraform plan, and explicitly execute **that same plan**. FastAPI owns admission and the durable operation ledger; Temporal uses separate plan and apply phase workflows; the worker runs Terraform activities. The agent never receives cloud executor credentials or runs Terraform itself.
 
-Plan, rules and milestones: [docs/rewrite-plan.md](docs/rewrite-plan.md). Current state and evidence: [docs/progress.md](docs/progress.md).
+**Status (2026-10-02):** the operation API is an **unreleased, uncommitted working tree**. The full local suite passed **689 tests** with seven optional Floci tests skipped, on Terraform 1.15.9 and 1.16.5. A disposable local probe upgraded an older packaged image to the current one with a pending plan, which then executed exactly once; nothing has been deployed to a hosted environment. [Evidence and remaining gates](docs/progress.md) · [Session handoff](docs/session-handoff.md)
 
-## Run with Docker (easiest)
+## Contents
 
-```sh
-docker compose up --build -d      # Temporal + worker + API; UI http://localhost:8233
-curl localhost:8000/healthz
-docker compose logs -f worker     # watch jobs
-docker compose down               # stop; data in .local/data is kept
+- [How it fits together](#how-it-fits-together)
+- [Run it locally](#run-it-locally)
+- [Make one request and review its plan](#make-one-request-and-review-its-plan)
+- [HTTP client](#http-client)
+- [Operation states and recovery](#operation-states-and-recovery)
+- [What must survive a restart](#what-must-survive-a-restart)
+- [Placement, identity, budgets, and secrets](#placement-identity-budgets-and-secrets)
+- [Versions and compatibility](#versions-and-compatibility)
+- [Verification and deeper guides](#verification-and-deeper-guides)
+
+## How it fits together
+
+The API and worker must share **one host and durable local disk** for the operation ledger, Terraform state, and saved plans. The diagram shows the local development topology, with a persistent Temporal dev server on that host. An existing Temporal service can replace **only that scheduling/history role**; it does **not** make the SQLite ledger or plan files remote. The worker runs the trusted, registered pattern; patterns live in separate Git repositories and resolve from tags to pinned commits. The bundled `local-file` example is unversioned and needs no cloud account.
+
+```mermaid
+flowchart TB
+  Agent[Agent or human<br/>HTTP client]
+  Git[Registered Git pattern repositories]
+  Cloud[Cloud providers<br/>or isolated emulators]
+  subgraph Host[One durable ForgeAPI host]
+    direction TB
+    API[FastAPI<br/>policy and HTTP contract]
+    Temporal[Local Temporal dev server<br/>scheduling and history]
+    Worker[Temporal worker<br/>Terraform activities]
+    Ledger[(SQLite<br/>operations and append-only audit)]
+    Files[(Protected local disk<br/>saved plans, state, receipts)]
+    API -->|dispatch after commit| Temporal
+    Temporal -->|operation ID and phase| Worker
+    API -->|authorize and reserve| Ledger
+    Worker -->|claim and record outcome| Ledger
+    Worker <--> Files
+  end
+  Agent -->|intent and reviewed digest| API
+  Git -->|tags and input schema| API
+  Git -->|pinned module revision| Worker
+  Worker -->|plan or apply| Cloud
+  classDef api fill:#E8F1FF,stroke:#2563EB,color:#111827,stroke-width:2px;
+  classDef execute fill:#E7F7EE,stroke:#15803D,color:#111827,stroke-width:2px;
+  classDef durable fill:#FFF4D6,stroke:#B45309,color:#111827,stroke-width:2px;
+  classDef policy fill:#F3E8FF,stroke:#7E22CE,color:#111827,stroke-width:2px;
+  classDef uncertain fill:#FDE8E8,stroke:#B91C1C,color:#111827,stroke-width:2px;
+  class API,Agent api;
+  class Worker,Cloud execute;
+  class Ledger,Files,Temporal durable;
+  class Git policy;
+  style Host fill:#F8FAFC,stroke:#94A3B8,color:#0F172A
 ```
 
-Then use the curl commands below. Run either this Docker stack or the native one, never both at once: two workers on one queue with different filesystem views break Terraform's provider cache. Only the worker container gets the Terraform certificate (`.local/executor`, read-only); the API container does not. Temporal history is in-memory and resets on `down`; deployments and Terraform state do not.
+The API exposes the plan's **address, resource type, and action summary**, never raw plan values. Planning alone cannot create the requested resource. Only an explicit execution request with the saved binary plan's SHA-256 digest can start apply. Temporal workflows are deterministic; within Temporal execution, database and Terraform I/O live in activities. The API also writes its ledger during admission and reads Git catalog metadata. The current architecture has no MCP server or server-side model. [Design and failure boundaries](docs/agent-architecture.md)
 
-## Two apps
+## Run it locally
 
-For platforms that deploy one image as one HTTP app: the root `Dockerfile` is the **API** app and `deploy/engine/Dockerfile` is the **engine** app (Temporal dev server, Temporal web UI on the HTTP port, and the worker). The API points `FORGEAPI_TEMPORAL_ADDRESS` at the engine's port 7233. If any engine process stops, the container exits so the platform restarts it; a deployment interrupted that way is marked `interrupted` and can be retried, and the dead run's Terraform state lock is released automatically. Deployment guide: [docs/work-deployment.md](docs/work-deployment.md).
-
-## Run natively
-
-Needs [uv](https://docs.astral.sh/uv/) and the `terraform` binary. No Docker, Azure or Entra.
+Use Python/`uv` to start the API without auth, Azure, Docker, or credentials. For the **complete plan-and-apply example**, also run Temporal, a worker, Git, and Terraform. Acceptance can commit before Temporal is available, but returns an unconfirmed-dispatch 503 until the same request is retried and acknowledged. The SDK downloads its local Temporal dev server on first use. Run these in separate terminals from the repository root:
 
 ```sh
 uv sync
-uv run pytest                          # includes real Temporal + Terraform runs
+uv run uvicorn app.main:app --reload
 ```
 
-Three terminals:
+```sh
+uv run python -m app.devserver
+```
 
 ```sh
-uv run python -m app.devserver         # Temporal dev server :7233, UI http://localhost:8233
 uv run python -m app.worker
-uv run uvicorn app.main:app --reload   # API :8000, docs http://localhost:8000/docs
 ```
 
-`app.devserver` downloads the official Temporal dev-server binary on first use; `temporal server start-dev` works the same if you have the CLI.
+The unauthenticated API should stay on loopback. API and worker use the same `FORGEAPI_DATA_DIR` (default `.local/data`); the local dev server keeps history there as `temporal.db`. If using an existing Temporal service, configure `FORGEAPI_TEMPORAL_ADDRESS`, namespace, and task queue consistently for the API and worker. `GET /healthz` means the API process is live. `GET /readyz` also proves a ledger read and a Temporal health call succeed (503 names the failing check); neither proves Git, Terraform, or a cloud provider is available. For a packaged API/engine pair and shared-volume requirements, see the [work deployment brief](docs/work-deployment.md).
 
-```sh
-curl -s -XPOST localhost:8000/deployments -H 'content-type: application/json' \
-  -d '{"pattern":"local-file","inputs":{"filename":"hello.txt","content":"hi"}}'
-curl -s localhost:8000/deployments/<id>          # accepted -> planning -> applying -> succeeded
-curl -s localhost:8000/deployments/<id>/logs     # terraform output
-```
-
-## Patterns
-
-No Terraform lives in this repo. Each pattern is a runnable root module (its own `provider` and `backend "azurerm" {}` blocks) in its own git repo, versioned by semver tags. `patterns.yaml` is the whole registration:
-
-```yaml
-patterns:
-  key-vault:
-    repo: github.com/AzSkyLab/terraform-azurerm-key-vault
-    path: pattern            # omit when the root module is the repo root
-    default_version: v1.1.3  # optional pin; omit to follow the newest tag
-```
-
-| Call | What it does |
+| Setting | Purpose |
 | --- | --- |
-| `GET /patterns` | catalog |
-| `GET /patterns/{name}?version=v1.0.0` | everything needed to use it, read from the pattern repo at that tag: `about` (the repo's `config.yaml`: description, use cases, sizing, costs), `versions`, `inputs` (type, default, description, allowed values/ranges and the author's rule messages) and a ready-to-edit `example` request |
-| `GET /patterns/{name}/schema` | JSON Schema for `inputs`, for portals, form builders and client-side validation |
-| `POST /deployments?dry_run=true` | checks a request and creates nothing |
-| `POST /deployments/{id}/retry` | re-runs a failed deployment against the same commit, inputs and state; Terraform finishes what is missing |
-| `PUT /deployments/{id}` | change inputs and/or pattern version and apply the difference against the existing state (`inputs` replaces the whole set; omit to keep) |
-| outputs on `GET /deployments/{id}` | non-sensitive outputs, `secret_references` (Key Vault secret IDs found in them) and `withheld_outputs` (names only); secrets stay in the pattern's vault ([docs/outputs.md](docs/outputs.md)) |
-| `GET /deployments/{id}/events`, `GET /events` | audit trail: every accepted action, refusal, denied access and final outcome ([docs/audit.md](docs/audit.md)) |
-| `DELETE /deployments/{id}` | `terraform destroy` from the deployment's state; the record is kept as `destroyed` |
-| `POST /deployments {"pattern","version","inputs"}` | `version` optional (latest tag). The tag is resolved to a commit at acceptance; that commit is what runs, even if the tag later moves |
+| `FORGEAPI_DATA_DIR` | Shared local ledger, workspaces, plans, state, and local Temporal history path. |
+| `FORGEAPI_CATALOG_PATH` | Trusted pattern registry; defaults to `patterns.yaml`. |
+| `FORGEAPI_TEMPORAL_ADDRESS`, `FORGEAPI_TEMPORAL_NAMESPACE`, `FORGEAPI_TASK_QUEUE` | Where the API dispatches and the worker listens; defaults target local Temporal. |
+| `FORGEAPI_AUTH_MODE` | `none` for loopback development; `entra` validates bearer tokens; `easyauth` trusts its principal header only behind a proxy that strips caller-supplied copies. |
+| `FORGEAPI_TENANTS_PATH` | Private business-unit mapping; unset uses single-tenant rules. Caller identity is separate from the worker's cloud execution identity. |
 
-Inputs are checked at the API (422, all problems at once, never echoing the submitted value). `validation` blocks in the common shapes (`contains([...], var.x)`, `can(regex("...", var.x))`, numeric ranges, `length(var.x)` bounds, joined with `&&`) are lifted into the schema and answered with the author's own `error_message`. Any other rule is still enforced by Terraform at plan time and its message lands in the deployment's `error`.
+## Make one request and review its plan
 
-**Pattern authoring convention:** `variable` descriptions, `validation` error messages and `config.yaml` are the user documentation. Write them for the person calling the API.
-
-**Releasing a pattern change:** push a tag in the pattern repo. New deployments can use it immediately; nothing in this API is rebuilt or redeployed. Existing deployments stay on the commit they were created with.
-
-**State:** patterns with `backend "azurerm" {}` store state as `deployments/<id>.tfstate` in the configured storage container (Entra auth, blob-lease locking, no keys). Workspaces under `.local/data/deployments/` are throwaway. `local-file` (in `examples/`) is an unversioned, no-cloud example with local state.
-
-**Private repos:** natively git uses your own credential helper. For Docker: `FORGEAPI_GITHUB_TOKEN=$(gh auth token) docker compose up --build -d`.
-
-## Business units: where things go and who may deploy
-
-Optional (`FORGEAPI_TENANTS_PATH`). Callers say what they want; the platform decides where. A mapping ([tenants.example.yaml](tenants.example.yaml)) ties Entra groups to business units, and each business unit + environment to a subscription. It also supplies inputs callers must not set (business unit, cost centre, subnets), limits patterns and regions, and restricts who may deploy to which environment. T-shirt sizes come from the pattern's own `config.yaml` and lock the inputs they set. Each business unit + environment can have an estimated monthly budget, checked against the patterns' own cost estimates before anything is deployed. Deployments belong to their business unit; others cannot see them. Callers never see a subscription ID. Design and rules: [docs/tenancy.md](docs/tenancy.md).
+This local example writes a file inside an isolated Terraform workspace. Save the exact intent and keep its key: they are the recovery identity if a network response is lost. The commands below each perform **one** requested step; replace the uppercase IDs and digest with actual returned values. Read `changes` before executing.
 
 ```sh
-curl -s localhost:8000/me                       # my business units, environments, patterns
-curl -s -XPOST localhost:8000/deployments -H 'content-type: application/json' \
-  -d '{"pattern":"key-vault","environment":"dev","size":"small","inputs":{"name":"kv1", ...}}'
+cat > intent.json <<'JSON'
+{
+  "pattern": "local-file",
+  "inputs": {
+    "filename": "smoke.txt",
+    "content": "created through a reviewed plan"
+  }
+}
+JSON
+
+uv run python -m app.client --url http://127.0.0.1:8000/v1 discover
+uv run python -m app.client --url http://127.0.0.1:8000/v1 patterns
+uv run python -m app.client --url http://127.0.0.1:8000/v1 describe local-file
+uv run python -m app.client --url http://127.0.0.1:8000/v1 validate --body intent.json
+uv run python -m app.client --url http://127.0.0.1:8000/v1 submit --body intent.json --key smoke-1
+uv run python -m app.client --url http://127.0.0.1:8000/v1 status OPERATION_ID
+
+# After state is "planned", inspect changes and copy its plan_digest yourself.
+uv run python -m app.client --url http://127.0.0.1:8000/v1 execute OPERATION_ID --digest REVIEWED_SHA256
+uv run python -m app.client --url http://127.0.0.1:8000/v1 status OPERATION_ID
+uv run python -m app.client --url http://127.0.0.1:8000/v1 events OPERATION_ID --limit 20
 ```
 
-## Hosting
+Validation checks the request but reserves nothing and runs no Terraform. Submission atomically records a queued operation, its resource reservation, and an `accepted` audit event. The API then asks Temporal to schedule planning and returns `202` **after dispatch is acknowledged**, without waiting for Terraform. If dispatch cannot be confirmed after acceptance, the API returns `503 dispatch_unconfirmed` with the recorded operation ID and `retry_same_request`. Retry the **identical body and key**; a fresh key could create a second resource for a create intent, or conflict if an existing resource ID was explicit. Without that retry, accepted work may remain queued.
 
-**Deploying at work (existing ACA environment, MCP server, no local dev):** paste [docs/work-prompt.md](docs/work-prompt.md) into the assistant; it follows [docs/work-deployment.md](docs/work-deployment.md).
-
-Plan for Azure Container Apps, free when idle: [docs/hosting-plan.md](docs/hosting-plan.md). Built so far: `FORGEAPI_DB_BACKEND=table` (Azure Table Storage, Entra auth) and `FORGEAPI_AZURE_USE_MANAGED_IDENTITY=true` (Terraform provider, state backend and Table Storage use the app's managed identity; no certificate).
-
-## Auth
-
-Default `FORGEAPI_AUTH_MODE=none` is for loopback development. `entra` validates bearer tokens (signature via tenant JWKS, issuer, audience, expiry) on every `/deployments` route.
-
-## Layout
-
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'actorBkg': '#E8F1FF', 'actorBorder': '#2563EB', 'actorTextColor': '#111827', 'noteBkgColor': '#FFF4D6', 'noteBorderColor': '#B45309', 'noteTextColor': '#111827', 'signalColor': '#64748B', 'signalTextColor': '#111827'}}}%%
+sequenceDiagram
+  autonumber
+  participant Caller
+  participant API
+  participant Ledger
+  participant Temporal
+  participant Worker
+  Caller->>API: Describe and validate intent
+  API-->>Caller: Schema and validation result, no reservation
+  Caller->>API: POST intent and Idempotency-Key
+  API->>Ledger: Commit queued operation, reservation, accepted event
+  Ledger-->>API: Durable operation and resource IDs
+  API->>Temporal: Start plan phase workflow
+  alt Dispatch acknowledged
+    API-->>Caller: 202 queued with status link
+  else Dispatch unconfirmed
+    API-->>Caller: 503 dispatch_unconfirmed with recorded ID
+    Note over Caller,API: Retry identical body and key to confirm dispatch
+  end
+  Temporal->>Worker: Run plan activity, no automatic retry
+  Worker->>Ledger: Claim phase, then save plan digest and safe changes
+  Caller->>API: GET status and inspect planned changes
+  API-->>Caller: Saved plan digest and execute link
+  Caller->>API: POST execute with reviewed exact digest
+  API->>Ledger: Commit apply_queued and accepted execute event
+  API->>Temporal: Start apply phase workflow
+  API-->>Caller: 202 when dispatch acknowledged
+  Temporal->>Worker: Run apply activity, no automatic retry
+  Worker->>Worker: Verify saved plan bytes, then attempt apply
+  Worker->>Ledger: Record succeeded, failed, or uncertain outcome
 ```
-app/main.py        routes + Temporal dispatch      app/workflows.py   DeployWorkflow (no I/O)
-app/catalog.py     git-tag catalog, reads variables
-app/schema.py      rules -> JSON Schema, examples  app/activities.py  plan / apply / mark_failed
-app/tenants.py     business-unit mapping
-app/placement.py   injected inputs, sizes
-app/budgets.py     estimated cost budgets
-app/audit.py       append-only audit events
-app/db.py          records: SQLite or Table         app/terraform.py   CLI wrapper, cache gate
-app/logs.py        logs: file or Table chunks
-app/recovery.py    heartbeat, interrupted runs
-app/engine.py      engine app: Temporal+UI+worker
-app/auth.py        who is calling + groups         app/worker.py, app/devserver.py
+
+A Git pattern should use its tag in `version` and set `expected_commit` to the commit returned by validation; a moved tag is refused. An update uses a new key, the existing `resource_id`, and complete desired inputs. A destroy uses a new key, `action: "destroy"`, its pattern, and the same resource ID. Both produce a **new plan requiring explicit execution**. Do not use the local example's unversioned behavior as the contract for Git patterns.
+
+## HTTP client
+
+`/v1` is the canonical operation contract. Each business route below also exists at the root as a **v1 alias**, with the same handlers, caller/key scope, and ledger; links and `Location` retain the route family used. `/healthz` and `/readyz` are unversioned. The canonical schema is `/v1/openapi.json`; `/openapi.json` retains the root route surface. The previous `/deployments` API is isolated at `app.legacy:app` and is not an operation route.
+
+| Purpose | Canonical route | Meaning |
+| --- | --- | --- |
+| Onboard a pattern | [docs/pattern-onboarding.md](docs/pattern-onboarding.md) | Template, `python -m app.pattern_check`, register, `GET /patterns/{name}/check` |
+| Multi-cloud HA app | [docs/ha-apps.md](docs/ha-apps.md) | Replicas per cloud + Route 53 failover router; failover is a reviewed plan |
+| Developer portal | `GET /console` | My infrastructure, jobs, history, budgets, projects, landing zones, managed objects; apply/discard with confirmation |
+| Discovery | `GET /v1/agent` | Contract, links, capabilities, allowed patterns |
+| Pattern details | `GET /v1/patterns/{name}` | Inputs, versions, resolved commit, caller-visible metadata |
+| Dry validation | `POST /v1/intents/validate` | Validate without admission or Terraform planning |
+| Submit | `POST /v1/operations` | `Idempotency-Key` required; queue planning |
+| List | `GET /v1/operations` | Visible operations; offset or advertised stable cursor |
+| Status | `GET /v1/operations/{id}` | State, safe plan summary, digest, next action |
+| Events | `GET /v1/operations/{id}/events` | Append-only operation trail, paged by sequence |
+| Execute | `POST /v1/operations/{id}/execute` | Explicit saved `plan_digest`; queue apply |
+| Discard | `POST /v1/operations/{id}/discard` | Reject a `planned` operation; it ends `failed` and releases the resource and budget reservation |
+| Catalog | `GET /v1/patterns` | Patterns the caller may use, with cloud and describe link |
+| Inventory | `GET /v1/resources`, `GET /v1/resources/{id}` | Resources the caller may see, with state, last applied outputs and latest operation; filter by `pattern`, `environment`, `state`, `label` |
+| Reconcile | `POST /v1/operations/{id}/reconcile` | Operator only: record an `uncertain` operation as `succeeded` or `failed` after inspecting state; releases the resource |
+
+Use HTTP or the importable [`Client`](app/client.py) / `python -m app.client`. The bundled client discovers same-origin links, requires HTTPS outside loopback, refuses redirects and inherited proxies, and never obtains or stores credentials. The quickstart's explicit `/v1` base targets this runtime; for an older server, use the root base URL so the client bootstraps through `/agent` and follows its advertised links. For authenticated use, set the short-lived `FORGEAPI_CLIENT_TOKEN` at runtime, not in a command argument or file. The client does not automatically retry a mutation, execute a plan, or traverse pages. A contradictory submission response remains an ambiguous mutation: retain the original body/key and do not trust the contradictory operation ID.
+
+For operation pagination, check discovery's `stable_operation_pagination` capability. Fetch `operations --limit 20`, then use its `next_before` with `operations --before OPERATION_ID` until null. Cursor pages are stable against new insertions, though item states can change. Older offset/`next_offset` pages remain available; new insertions can shift them. Do not combine `before` with nonzero `offset`. For events, pass the returned `next_after` to `events --after EVENT_SEQUENCE` until null. Each client call fetches one page. The client accepts older discovery without optional capability metadata, but will not assume a missing capability authorizes cursor mode. [Compatibility rules](docs/api-versioning.md)
+
+### Organizing and composing resources
+
+- `labels` on a deploy intent tag the resource (`GET /v1/resources?label=team=platform`); they are metadata only and never reach Terraform.
+- `input_refs` copies a public output of a `ready` resource you can see (same business unit and environment) into an input at acceptance: `{"input_refs": {"resource_group_name": {"resource_id": "res_…", "output": "name"}}}`. A referenced resource cannot be destroyed while a `ready` resource uses it.
+- An update intent naming another `version` upgrades the resource through a reviewed plan (state must live outside the workspace, e.g. the azurerm backend).
+- Discovery shows each environment's guardrails (`allow_destroy`, `protected_resource_types`) and budget headroom (`monthly_budget`, `reserved`, `available`).
+- A `failed` or `uncertain` operation caused by Terraform shows a sanitized `diagnostic` (Terraform's first error; placement IDs, URLs and auth errors never appear).
+- With `FORGEAPI_PLAN_MAX_AGE_HOURS` set, unexecuted plans expire (`plan_expires_at`; execute returns 409 `plan_expired`).
+
+## Operation states and recovery
+
+An operation is the durable request/plan/outcome; a resource is the Terraform state identity across operations. The state machine deliberately has **no automatic exit from `uncertain`**. A Terraform apply may have changed the provider before the worker lost its result; neither a retry nor a second plan is safe to infer from an HTTP timeout.
+
+```mermaid
+flowchart TB
+  Q[queued] -->|planning activity claims| P[planning]
+  P -->|saved plan and SHA-256| R[planned]
+  P -->|planning error| F[failed]
+  P -->|activity lost or timed out| U[uncertain]
+  R -->|caller sends exact digest| AQ[apply_queued]
+  AQ -->|apply activity claims| A[applying]
+  A -->|saved plan missing or changed| F
+  A -->|apply and safe outputs recorded| S[succeeded]
+  A -->|execution error, loss, or timeout| U
+  classDef api fill:#E8F1FF,stroke:#2563EB,color:#111827,stroke-width:2px;
+  classDef execute fill:#E7F7EE,stroke:#15803D,color:#111827,stroke-width:2px;
+  classDef durable fill:#FFF4D6,stroke:#B45309,color:#111827,stroke-width:2px;
+  classDef policy fill:#F3E8FF,stroke:#7E22CE,color:#111827,stroke-width:2px;
+  classDef uncertain fill:#FDE8E8,stroke:#B91C1C,color:#111827,stroke-width:2px;
+  class Q,P,R,AQ durable;
+  class A,S execute;
+  class F,U uncertain;
+  Q -.->|phase fails before claim| U
+  AQ -.->|phase fails before claim| U
 ```
+
+The ledger fences claims and late results. Temporal plan/apply activities have `maximum_attempts=1`; the idempotent status writer may retry. A phase failure or timeout can mark `queued`/`planning` or `apply_queued`/`applying` as `uncertain`, depending on whether its activity claimed the ledger row. Planning and applying have 10- and 30-minute activity timeouts respectively, but those timeouts do **not** kill a surviving Terraform subprocess. `uncertain` is terminal for polling, yet its resource reservation remains and blocks replacement work until an operator examines state and provider evidence. There is no automatic apply retry, replan during execution, force-unlock, or reconciliation endpoint. A `failed` plan or a missing/changed saved plan is distinct from uncertainty after an apply attempt. [Interruption and dispatch-crash evidence](docs/agent-architecture.md#runtime-and-failure-boundary)
+
+| Observation | Safe next step |
+| --- | --- |
+| `503 dispatch_unconfirmed` with recorded operation ID | Keep the same body/key or operation/digest and retry to confirm dispatch. The accepted row already exists. |
+| Fixed `503 operation ledger unavailable` or `audit unavailable` | No accepted dispatch is confirmed. Restore storage, then check status and retry the same identity; do not invent a fresh key. |
+| `422`, `403`, or `409` | Inspect the structured error and correct the request or permissions. A conflicting key is not a transport retry. |
+| `uncertain` | Stop mutation of that resource and have an operator reconcile ledger, Terraform state, and provider evidence. No automated recovery path exists. |
+
+An identical retry can return the **same, already progressed operation** with `202`; that response is not proof of a newly scheduled activity. Do not infer cloud exactly-once behavior from HTTP idempotency alone.
+
+## What must survive a restart
+
+The operation ledger, Temporal history, and Terraform artifacts describe **different parts of the same operation**. Keep their identity, paths, configuration, and compatible toolchain together. The worker may resume a queued activity after a restart; it must not be given a different saved plan under the same digest.
+
+```mermaid
+flowchart LR
+  OP[Operation ID<br/>request key, state, digest] --> SQL[(operations.sqlite<br/>operations and resources)]
+  OP --> EVT[(operations.sqlite<br/>append-only events)]
+  OP --> TH[(temporal.db in local dev<br/>or external Temporal history)]
+  OP --> RID[Resource ID]
+  RID --> WORK[(deployments / resource ID / work<br/>tfplan, local state when used,<br/>local-example output file)]
+  WORK --> LOG[(deployments / resource ID<br/>command receipts)]
+  WORK -.-> REMOTE[(Configured remote<br/>Terraform state backend)]
+  CAT[(pattern-cache and plugin-cache)] --> WORK
+  classDef api fill:#E8F1FF,stroke:#2563EB,color:#111827,stroke-width:2px;
+  classDef execute fill:#E7F7EE,stroke:#15803D,color:#111827,stroke-width:2px;
+  classDef durable fill:#FFF4D6,stroke:#B45309,color:#111827,stroke-width:2px;
+  classDef policy fill:#F3E8FF,stroke:#7E22CE,color:#111827,stroke-width:2px;
+  classDef uncertain fill:#FDE8E8,stroke:#B91C1C,color:#111827,stroke-width:2px;
+  class OP,RID api;
+  class SQL,EVT,TH,WORK,LOG,CAT,REMOTE durable;
+```
+
+With the default settings, local files sit under `.local/data/`; in the packaged image the shared mount is `/data` and must be writable by UID 1000 in both API and engine containers. A pattern can configure a remote Terraform state backend, which must be protected and backed up separately. Protect both stores: **binary plans and Terraform state can contain secrets**, even though raw plans, provider diagnostics, and sensitive output values are not published or logged by the API. Command logs contain command/exit receipts. Temporal history carries operation IDs and phase names, not request bodies.
+
+`tfplan` is the current saved plan in a resource's workspace, not an immutable archive. The worker removes it after the Terraform apply command returns successfully, before public outputs and the final operation state are recorded. Preserve the whole workspace for pending plans and stateful updates; do not copy only `operations.sqlite`.
+
+For a backup, stop admissions and **all writers**, including surviving Terraform children, then copy the entire protected data directory at one quiesced point. Restore with writers stopped, the original absolute paths and configuration, and a compatible toolchain. A stale backup cannot establish what the provider did after the snapshot; reconcile before resuming. The local restore test covers a stopped whole-tree copy and one pending exact-plan execution, not a live backup or cloud recovery. An external Temporal service and cloud/emulator state need their own protection. [Backup and runtime detail](docs/agent-architecture.md#runtime-and-failure-boundary)
+
+## Placement, identity, budgets, and secrets
+
+Without a tenant mapping, the API uses single-tenant operation rules. Independently, the local default is `FORGEAPI_AUTH_MODE=none`; hosted auth and placement are configured separately. In a placed deployment, the caller selects an allowed business unit, environment, and catalog pattern; **the platform** selects cloud target, region, injected variables, and budget policy. Caller-supplied values for injected variables are refused. The accepted resource cannot silently move to another target; execution and later changes recheck current permission and target identity. The API identity should have no Terraform cloud-deploy rights; the worker holds that execution role. Hosted Easy Auth/JWT integration remains a separate verification gate.
+
+```mermaid
+flowchart TB
+  Caller[Caller identity<br/>groups and selected BU/environment] --> Access{Allowed here?}
+  Catalog[Trusted catalog<br/>pattern, tag, pinned commit] --> Schema[Pattern input schema<br/>and permitted sizes]
+  Access -->|yes| Schema
+  Access -->|no| Refuse
+  Schema --> Inject[Platform injects<br/>target IDs, region, fixed inputs]
+  Mapping[(Private tenant mapping<br/>cloud targets and budget)] --> Access
+  Mapping --> Inject
+  Inject --> Budget{Estimated cost fits<br/>reservation?}
+  Budget -->|yes| Accept[(Atomic ledger acceptance<br/>and audit before dispatch)]
+  Budget -->|no or invalid| Refuse[Refuse safely<br/>no operation or dispatch]
+  classDef api fill:#E8F1FF,stroke:#2563EB,color:#111827,stroke-width:2px;
+  classDef execute fill:#E7F7EE,stroke:#15803D,color:#111827,stroke-width:2px;
+  classDef durable fill:#FFF4D6,stroke:#B45309,color:#111827,stroke-width:2px;
+  classDef policy fill:#F3E8FF,stroke:#7E22CE,color:#111827,stroke-width:2px;
+  classDef uncertain fill:#FDE8E8,stroke:#B91C1C,color:#111827,stroke-width:2px;
+  class Caller api;
+  class Catalog,Schema,Access,Inject,Budget policy;
+  class Mapping,Accept durable;
+  class Refuse uncertain;
+```
+
+Budget estimates are admission rules, not bills. When configured, SQLite serializes reservation checks against contributing current, failed, and uncertain resources; a missing estimate cannot be treated as free. Invalid cost configuration or stored accounting data fails safely before new acceptance. Exact-key replay and destroy retain their existing paths. [Placement and budget contract](docs/tenancy.md)
+
+Every accepted mutating action is audited **before dispatch**; refused mutations are audited without submitted values. Reads and validation-only requests do not append refusal events. If acceptance or its required audit cannot be recorded, the action is not dispatched. The audit table has append-only triggers, but it is not an external immutable log. Caller visibility hides other business units' operation IDs and event trails. [Architecture audit rules](docs/agent-architecture.md#policy-and-data)
+
+Patterns should pass **secret references**, not secret values, and mark sensitive outputs. The API withholds sensitive output values, lists their names in `withheld_outputs`, and also withholds outputs containing known placement IDs. Public plan summaries are rejected if they disclose those IDs. Strict JSON validation happens after output filtering; an invalid public output after apply becomes `uncertain`, preserving its reservation. Private Terraform state and plans still require disk protection. [Outputs and secret conventions](docs/outputs.md)
+
+## Versions and compatibility
+
+These axes evolve independently. A changed API release or route spelling must not rewrite a caller's accepted request identity.
+
+| Axis | Current meaning | Compatibility rule |
+| --- | --- | --- |
+| HTTP contract | `agent-v1`, canonical `/v1`, root v1 aliases | Preserve existing v1 requests, statuses, defaults, pagination, and execution meanings; new optional behavior needs a capability. |
+| Application release | `1.0.0` in discovery | A release number describes code, not the API major or a Terraform pattern revision. This working tree is unreleased. |
+| Pattern revision | Git tag resolved to a commit at acceptance | Pin the commit in the operation; `expected_commit` detects a moved tag between validation and submit. Local examples are unversioned. |
+| Persistent execution | SQLite ledger, saved plan, Temporal history, Terraform/toolchain | API compatibility alone does not prove replay, schema migration, downgrade, or mixed-worker compatibility. Preserve and test affected history and artifacts. |
+
+Older conforming v1 clients may ignore **additive response fields**, but unknown request fields remain errors and unfamiliar operation states or `next_action` instructions require a safe stop. New clients can use older servers only for shared capabilities: missing discovery metadata means the baseline contract, not permission for an optional feature. Root and `/v1` aliases share the same caller/key fingerprint and operation; a release number does not change it. The bundled client performs bounded compatibility checks but does not claim arbitrary future-server support. Read the [versioning policy](docs/api-versioning.md) before changing a route, request field, ledger shape, workflow, or dependency.
+
+## Verification and deeper guides
+
+```sh
+uv run pytest
+uv run ruff check .
+```
+
+The normal suite includes local HTTP, SQLite, Git catalog, real Temporal/Terraform lifecycle, interruption, replay, and quiesced restore coverage. Optional three-cloud Floci tests run only with `--floci` (start `docker compose -f compose.floci.yaml -p forgeapi-floci up -d`, then `uv run pytest --floci tests/test_floci.py tests/test_floci_features.py tests/test_floci_placed_features.py`; the second file proves composition, labels/filters, destroy protection, S3-backend version upgrades, discard/expiry and plan cleanup through real Temporal); their setup and lifecycle commands are in the [emulator guide](deploy/emulator/README.md) and [placement demo](deploy/emulator-placement/README.md). Floci is an emulator, so those results do not establish real-cloud IAM, billing, or regional behavior. The isolated current-image smoke used a fresh Docker volume and local-file pattern; its safe evidence is described in [progress](docs/progress.md). A hosted GitHub Actions run, immutable image publication, controlled hosted upgrade, and work-cloud identity remain unverified. Do not treat a local build as those release gates.
+
+| For… | Read… |
+| --- | --- |
+| Current state, actual test/image evidence, retained resources | [Progress](docs/progress.md) and [session handoff](docs/session-handoff.md) |
+| End-to-end design and failure boundaries | [Agent architecture](docs/agent-architecture.md) |
+| Client/server upgrade rules | [API versioning](docs/api-versioning.md) |
+| Tenant mapping, cloud placement, budget reservations | [Tenancy](docs/tenancy.md) |
+| Secret and output conventions | [Outputs](docs/outputs.md) |
+| Work environment deployment and identity requirements | [Work deployment brief](docs/work-deployment.md) and [work prompt](docs/work-prompt.md) |
+| Legacy `/deployments` material | [Archived Temporal guides](docs/archive-temporal/README.md) via the [handoff](docs/session-handoff.md) |
+
+`app.legacy:app` retains the previous deployment API for existing state. It was not migrated into `operations.sqlite`; do not run legacy mutations against the same resources or budgets concurrently with the new operation API.

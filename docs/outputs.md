@@ -2,6 +2,18 @@
 
 **Question this answers:** a pattern creates a database; how does the caller get the connection string, now and next month?
 
+## Current operation API
+
+The operation API returns safe outputs on `GET /v1/operations/{id}`. It follows the reference-only
+and withholding rules below; sections naming `/deployments` describe the retained legacy API.
+
+Public Terraform outputs must serialize as strict JSON after sensitive and placement-ID
+filtering. If an oversized number decodes to infinity, publication fails through the existing
+uncertain execution path: keep the reservation and reconcile with an operator; never reapply
+automatically. Sensitive outputs are withheld before this check. Finite values and exact large integers remain
+valid; overflowing command-output responses are a fault-injection boundary, not an observed
+normal Terraform output behavior.
+
 ## Decisions (engineer, 2026-09-21)
 
 - Secrets live in **whatever Key Vault the pattern creates**. The platform has no vault of its own.
