@@ -16,6 +16,9 @@ data:
   FORGEAPI_DATA_DIR: "/data"
   # A planned operation not executed within this many hours expires; submit a new intent.
   FORGEAPI_PLAN_MAX_AGE_HOURS: "24"
+  # Opt-in: re-check an app requester's live Entra groups (Microsoft Graph) before background
+  # router/replica-destroy acceptance. Needs GroupMember.Read.All for the workload identity.
+  # FORGEAPI_LIVE_GROUP_CHECKS: "true"
   # AKS workload identity (app/terraform.py _env/_backend_args): the pod webhook injects
   # AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_FEDERATED_TOKEN_FILE; this tells the azurerm provider
   # and state backend to use them. Mutually exclusive with the other Azure identity settings

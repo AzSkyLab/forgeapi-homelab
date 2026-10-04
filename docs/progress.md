@@ -2,6 +2,88 @@
 
 Plan and milestone definitions: [rewrite-plan.md](rewrite-plan.md). Go-era progress: [archive-go/progress.md](archive-go/progress.md).
 
+## 2026-10-04 — Real Entra: caller auth through the full stack, live group re-checks via Graph
+
+The engineer provided a lab Entra tenant with a signed-in `az` session ("you can use that to
+verify"). Used read-only: token issuance and Graph reads; **nothing was created or changed in
+Entra or any cloud** (existing app registration "ForgeAPI Lab API", existing `forgeapi-lab-*`
+groups). Cloud targets stayed on Floci AWS. Tenant-specific IDs live only in the scratchpad
+run directory, not in the repo.
+- **Caller auth, real tokens** (API in `entra` mode, real Temporal, production worker, Terraform,
+  Floci AWS; isolated run dir without `.env`): `/readyz` 200; no token, a garbage token and a real
+  tenant-signed ARM token (wrong audience) → 401; the real v2 token (23 group claims) → discovery
+  shows only the business unit of the caller's group (`platform`, not `hr`) and only `dev`
+  (`prod` needs another group); validate/submit into `prod` or `hr` → 403; deploy in
+  `platform/dev` planned → exact digest → `succeeded` (S3 404 → 200), `owned_by_caller` true, no
+  account ID in the resource; destroy → 404. No token text in API or worker logs.
+- **Live group re-checks** (`FORGEAPI_LIVE_GROUP_CHECKS`, default off): with `entra` auth, before
+  `AppRolloutWorkflow` accepts the router and `AppTeardownWorkflow` accepts replica destroys, the
+  worker calls Graph `getMemberGroups` for the requester and intersects with the request-time
+  snapshot (`apps.current_caller`): removal takes effect as `requester_access_revoked`, added
+  membership is never gained, a vanished object has no groups. Graph failure → 503
+  `group_check_unavailable`, transient (the app waits and retries). Identity: existing
+  `azure_identity.credential()`; worker needs `GroupMember.Read.All`. No new dependency (urllib).
+- **Bug found by the real stack, fixed:** with the worker unable to reach Graph the app went
+  `failed` ("router could not be accepted") instead of waiting: both app activities re-raised any
+  5xx before checking for transient refusals, and Temporal's bounded activity retries ran out.
+  Root fix in `app_activities.py`: transient check first. Red/green-reasoned activity tests added.
+- **Real-stack proof:** `POST /apps` (two AWS replicas + Route 53 router) under a real token with
+  live checks on: replicas gate → router accepted after the Graph check → ready → teardown, replica
+  destroys accepted after the Graph check → destroyed, S3 404. Negative: worker with no Azure
+  login (`AZURE_CONFIG_DIR` empty) held the app in `planning_router` for 120 s with no error and
+  no router; the same app proceeded to the router gate once a worker with the login started.
+  Before the fix the identical run failed the app. Real-Graph pytest (`tests/test_live_groups.py
+  ::test_real_graph`, opt-in via `FORGEAPI_TEST_ENTRA_*`): member group kept, non-member group
+  stripped. All test apps destroyed; Floci project removed (0 containers/networks).
+
+**Evidence:** `tests/test_live_groups.py` (13 incl. the opt-in real-Graph test, which root ran:
+13 passed with the real-Graph test enabled, after the activity tests). Default suite **1181 passed, 31
+skipped** in two consecutive `-rf` runs; Ruff and whitespace passed (the docs test first caught the
+undocumented setting).
+
+**Limits:** Graph `GroupMember.Read.All` for the hosted identity is unverified (the lab used the
+signed-in user); a requester identified by `sub` (no `oid`) is refused under live checks; the
+lab token's group claim worked with 23 groups (overage >200 still refused, unchanged); the
+workload-identity token exchange itself was not run against real Entra (needs a public OIDC
+issuer — the work cluster).
+
+## 2026-10-04 — Work-move prep: Temporal mTLS and AKS workload identity proven in the lab
+
+Goal: close the two settings the AKS target depends on that had never run for real (home lab
+only; no real cloud touched). Opus planned/reviewed; two Sonnet coders wrote the tests; root
+probed by hand, reran everything and wrote the docs.
+- **Temporal TLS/mTLS** (`tests/test_temporal_tls_live.py`, default suite). The Temporal dev
+  server has no TLS listener, so the test puts a TLS terminator in front of it that requires a
+  client certificate and offers ALPN h2; certificates are generated per test and the server
+  certificate's only SAN is `temporal.internal`. Through it: `/readyz`'s `ready()`, the API's own
+  dispatch (no injected client) and `build_worker` ran a local-file plan → exact-digest apply →
+  file readback; every connection presented the client certificate. Refused: no client cert,
+  unrelated CA, no server name, plaintext. No product change was needed.
+- **AKS workload identity** (`tests/test_floci_workload_identity.py`, `--floci`, test pattern
+  `examples/floci-wi-azure`). Root first proved by hand that Floci Azure answers the federated
+  client-assertion exchange (`POST /{tenant}/oauth2/v2.0/token`, seen in its log) and that
+  Terraform 1.16.5 + azurerm 4.65.0 creates a resource group with `ARM_USE_AKS_WORKLOAD_IDENTITY`
+  and a token file (readback 200, destroyed 404); a missing token file fails with `reading OIDC
+  Token from file ... provided by AKS Workload Identity`. The test sets only the webhook's
+  `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_FEDERATED_TOKEN_FILE`, so it proves the product maps
+  them: API → real Temporal → `build_worker` → Terraform → Floci created the group (404 before,
+  200 after), a destroy planned with the token file removed ended `failed` with the fixed
+  credential diagnostic and the group intact, and a destroy with the file restored read back 404.
+  **Root rerun: 1 passed on Terraform 1.15.9 (44.43 s) and 1.16.5 (44.34 s).**
+- **Backend:** by hand on 1.16.5, `backend "azurerm"` with `use_aks_workload_identity=true`
+  initialised, authenticated through the token file and reached the storage-account lookup
+  (404, nothing created). Full blob state was not run: the backend speaks HTTPS to
+  `*.blob.core.windows.net` and the emulator storage proxy is HTTP-only by design; no
+  emulator-specific plumbing was added (engineer rule). A dead proxy guaranteed nothing left the host.
+- **Decision (lab gap 3, live Entra group membership):** first deferred (needs Graph, not provable on emulators); superseded the same day once the engineer offered a lab Entra tenant — see the next entry.
+- Emulator compose project `forgeapi-wiprobe-20261004` removed (0 containers, 0 networks, no
+  resource groups left). Default suite **1169 passed, 30 skipped** in two consecutive `-rf`
+  runs; Ruff and whitespace passed.
+
+**Limits:** emulator evidence only: real Entra federated credentials, the AKS webhook, Azure
+RBAC, Azure Disk and the work cluster's Temporal certificates remain unverified. A diagnostic
+that is not a credential error can still include a local file path (paths are not redacted).
+
 ## 2026-10-04 — AKS base rehearsed with real provider Terraform against Floci
 
 The engineer asked why the kind rehearsal used only the `local-file` pattern instead of

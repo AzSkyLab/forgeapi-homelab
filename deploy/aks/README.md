@@ -126,12 +126,17 @@ with your platform's own egress tooling if you need to.
 
 - No image has been built and pushed for this base; the registry reference is a placeholder.
 - No apply, rollout or `/readyz` check has been run against a real AKS cluster.
+- Workload identity: the platform side (webhook variables → azurerm's federated-token path, provider
+  and backend) is proven against the Floci Azure emulator on Terraform 1.15.9 and 1.16.5
+  (`tests/test_floci_workload_identity.py`); the real webhook, federated credential and RBAC are not.
 - Azure RBAC role assignments for the app registration/identity are the operator's
   responsibility; none are created here.
 - Remote Terraform state (`FORGEAPI_STATE_*`) is not configured in this base; add it to the
   ConfigMap if your patterns declare `backend "azurerm" {}`.
 - Temporal TLS is off by default in `configmap.yaml` (commented example included); turning it on
   needs the PEM files mounted into the pod (e.g. from a Secret) at the paths you configure.
+  The settings themselves are proven in a real TLS/mTLS handshake against a real Temporal server
+  (`tests/test_temporal_tls_live.py`), not yet against your cluster's Temporal.
 - Pod disruption budgets, horizontal scaling and multi-replica/multi-disk designs are explicitly
   out of scope for this milestone (AGENTS.md "Keep it small").
 

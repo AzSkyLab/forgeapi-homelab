@@ -5,9 +5,7 @@ Exercised: the helper's TLS-off/CA-only/mTLS/server-name branches, the half-pair
 refusal, and that dispatch.ready/dispatch, legacy's TemporalDispatcher and worker.main all pass
 an explicit `tls=` kwarg to Client.connect (a direct, unpatched Client.connect call leaves `tls`
 at its implicit None default, so an explicit kwarg proves the call went through the helper).
-NOT exercised: a real TLS handshake against an actual Temporal server. temporalio's local test
-server (temporalio.testing.WorkflowEnvironment, used elsewhere in this suite) does not offer a
-TLS listener, so there is no real-server TLS test here.
+A real TLS/mTLS handshake against a real Temporal server is in test_temporal_tls_live.py.
 """
 
 import asyncio

@@ -46,10 +46,10 @@ def accept_app_router(app_id: str) -> str:
     try:
         return apps.accept_router(app)["router_operation_id"] or ""
     except (HTTPException, TenancyError) as error:
+        if apps.transient(error):  # before the 5xx check: group_check_unavailable is a 503
+            return "retry"
         if getattr(error, "status_code", getattr(error, "status", 0)) >= 500:
             raise  # the pattern repository or ledger is unavailable: retry, do not refuse
-        if apps.transient(error):
-            return "retry"
         ledger.fail_app(app_id, apps.refusal_text(error), refused=True)
         return ""
 
@@ -82,10 +82,10 @@ def accept_teardown_replica_destroys(app_id: str) -> dict:
     try:
         app = apps.accept_teardown_replicas(app)
     except (HTTPException, TenancyError) as error:
+        if apps.transient(error):  # before the 5xx check: group_check_unavailable is a 503
+            return {"operations": [], "refused": False, "retry": True}
         if getattr(error, "status_code", getattr(error, "status", 0)) >= 500:
             raise  # the pattern repository or ledger is unavailable: retry, do not refuse
-        if apps.transient(error):
-            return {"operations": [], "refused": False, "retry": True}
         ledger.fail_teardown(app_id, apps.refusal_text(error, "replica destroy"), refused=True)
         return {"operations": [], "refused": True}
     return {"operations": app["teardown"]["replicas"] or [], "refused": False}

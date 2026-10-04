@@ -1,15 +1,11 @@
 # Session handoff: continuous API improvement
 
-**Current as of:** 2026-10-04. This is an **unreleased, uncommitted working tree** on
-`main`; preserve all tracked edits and untracked files. A checkout of HEAD alone cannot resume
-this work. Nothing from this session has been committed, pushed, published or deployed to the existing environment.
-
-The engineer wants consecutive bounded milestones without routine approval. Latest steering:
-**8% of the weekly limit remains; keep the handoff ready for another model.** This is the user's
-reported quota, not a meter the agent can read. The current work is at a verified checkpoint;
-no implementation, test run, smoke process or cleanup remains pending. After that checkpoint, the user explicitly requested a comprehensive README with diagrams.
-That documentation update is complete and verified; runtime code remains frozen. Keep
-subsequent work bounded and document actual evidence.
+**Current as of:** 2026-10-04. Work through the AKS rehearsal is committed on local branch
+`platform-2026-10` (not pushed; see `git log`). This session's work-move prep (Temporal mTLS and
+workload-identity tests, docs) is **uncommitted** on that branch; preserve it. Nothing has been
+pushed, published or deployed. The engineer wants consecutive bounded milestones without
+questions; record decisions in progress. The current state is a verified checkpoint: no test
+run, emulator or agent is pending.
 
 ### Start the next session with this prompt
 
@@ -24,15 +20,16 @@ subsequent work bounded and document actual evidence.
 > with `-rf`), lint, whitespace, reruns every integration result itself, and owns all docs. Disclose
 > if routing or skills are unavailable.
 > Hard rules: never create, change or delete anything in real cloud from the home lab (real cloud
-> happens only after the move to the work environment); Floci emulators are free home-lab
+> happens only after the move to the work environment; the engineer's lab Entra tenant may be used
+> read-only for token/Graph verification); Floci emulators are free home-lab
 > verification only — no Floci-specific product features; never touch .local/data, retained
 > resources, or the stopped forgeapi-floci-test-*/forgeapi-floci-demo-* containers; start emulators
 > only with `docker compose -f compose.floci.yaml -p <unique-project> up -d` and remove the project
 > afterwards (zero containers/networks). Local Terraform is 1.15.9; the platform image uses 1.16.5
 > (copy it out of the local forgeapi image into the scratchpad). Always keep the status page current:
 > https://claude.ai/artifact/1CvrDzH8fYX9ZCbTt6FAYj (republish after every milestone).
-> State: the work is on branch `platform-2026-10` (see git log); default suite 1167 passed, 29
-> optional Floci skips. Every feature needs fast tests plus proof through the real stack (HTTP API →
+> State: the work is on branch `platform-2026-10` (see git log; newest tests may be uncommitted);
+> default suite 1181 passed, 31 optional skips (Floci + opt-in real Graph). Every feature needs fast tests plus proof through the real stack (HTTP API →
 > real Temporal → app.worker.build_worker → Terraform → Floci, with independent emulator readbacks);
 > never call a skipped or unrun check passed. Don't ask me questions; make reasonable decisions,
 > record them in progress.md, update session-handoff.md, docs/work-deployment.md and
@@ -44,6 +41,21 @@ subsequent work bounded and document actual evidence.
 
 ### Latest verified checkpoint
 
+- **Newest (2026-10-04): real Entra verification from the home lab** (engineer-provided lab
+  tenant, signed-in `az`; reads and token issuance only, nothing created in Entra/cloud). Real
+  tokens through API → Temporal → worker → Terraform → Floci (401s, group-scoped units/envs,
+  deploy/destroy). New opt-in `FORGEAPI_LIVE_GROUP_CHECKS` (Graph `getMemberGroups` before
+  background app acceptances), proven on real Graph; a real-stack run found and fixed app
+  activities failing on a transient 503. Tenant-specific IDs stay outside the repo (the run dir
+  is in the session scratchpad). Real-Graph pytest: set `FORGEAPI_TEST_ENTRA_OID`,
+  `FORGEAPI_TEST_ENTRA_MEMBER_GROUP`, `FORGEAPI_TEST_ENTRA_NONMEMBER_GROUP`.
+- **Newest (2026-10-04): work-move prep proven in the lab.** Temporal TLS/mTLS in a real
+  handshake (`tests/test_temporal_tls_live.py`, default suite) and AKS workload identity through
+  API → Temporal → worker → Terraform → Floci Azure on 1.15.9 and 1.16.5
+  (`tests/test_floci_workload_identity.py`, `--floci`). Default 1169 passed ×2. Live Entra
+  membership re-checks deliberately not built (needs Graph; see progress). **Next:** PRs if the
+  engineer asks; otherwise the work cluster (webhook, federated credential, RBAC, Azure Disk,
+  real Temporal certs) — work environment only.
 - **Newest (2026-10-04): independent three-part review → ~28 fixes; self-service Deploy;
   `deploy/aks` rehearsed end to end on a local kind cluster (`deploy/aks-rehearsal/`).** Default
   1167 passed ×2. **Next:** apply `deploy/aks` on the work AKS cluster (Entra, workload identity,

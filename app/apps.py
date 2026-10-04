@@ -7,8 +7,9 @@ member intents, derives the app's state from its members, and gates the two appr
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app import cloud_targets, ledger, policy, tenants
+from app import azure_identity, cloud_targets, ledger, policy, tenants
 from app.contracts import AppFailover, AppIntent, Intent, OperationError, canonical_intent
+from app.settings import settings
 from app.tenants import Caller, TenancyError
 
 NOTICE = (
@@ -29,11 +30,28 @@ NEXT_ACTION = {
 DISCARD = "discard_planned_operations"
 # A refusal that clears by itself (a drift check holds the resource for a moment): the workflows
 # retry it on the next cycle instead of failing the app.
-TRANSIENT = {"resource_busy", "resource_changed"}
+TRANSIENT = {"resource_busy", "resource_changed", "group_check_unavailable"}
 
 
 def transient(error: Exception) -> bool:
     return isinstance(error, OperationError) and error.reason in TRANSIENT
+
+
+def current_caller(actor: str, groups: list[str]) -> Caller:
+    """The requester with the groups they asked with. With live checks on, those are narrowed to
+    what they are in now: membership removed since then is lost, membership added is not gained."""
+    if not (settings.live_group_checks and settings.auth_mode == "entra"):
+        return Caller(actor, frozenset(groups))
+    try:
+        live = azure_identity.member_groups(actor)
+    except Exception as error:
+        raise OperationError(
+            503,
+            "could not check the requester's current group membership",
+            "group_check_unavailable",
+            next_action="poll",
+        ) from error
+    return Caller(actor, frozenset(groups) & (live or set()))
 
 
 def ensure_access(app: dict, caller: Caller) -> None:
@@ -149,7 +167,7 @@ def check_router(base: dict, caller: Caller) -> None:
 def accept_router(app: dict) -> dict:
     """Accept the router once the replicas have succeeded, exactly as `POST /operations` would:
     same validation, same budget check, same ledger code. Raises on refusal."""
-    caller = Caller(app["actor"], frozenset(app["caller_groups"]))
+    caller = current_caller(app["actor"], app["caller_groups"])
     ensure_access(app, caller)
     spec = app["router_spec"]
     ops = ledger.operations_by_id([m["operation_id"] for m in app["members"]])
@@ -584,7 +602,7 @@ def accept_teardown_replicas(app: dict) -> dict | None:
     """Accept destroys for every replica that is still deployed, as the requester would have
     through `POST /operations`; all or none. Raises on refusal. Idempotent."""
     teardown = app["teardown"]
-    caller = Caller(teardown["actor"], frozenset(teardown["caller_groups"]))
+    caller = current_caller(teardown["actor"], teardown["caller_groups"])
     ensure_access(app, caller)
     items = []
     for member in app["members"]:

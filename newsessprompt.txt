@@ -1,0 +1,21 @@
+Continue ForgeAPI in /home/zerocool/github/forgeapi-homelab.
+
+Read first: AGENTS.md, docs/session-handoff.md, docs/agent-architecture.md, and the newest entries in docs/progress.md (everything dated 2026-10-02 above "Attribute-level plan detail" is the last session). Find the installed Ponytail skill (last seen at ~/.codex/plugins/cache/ponytail/ponytail/4.10.1/skills/ponytail/SKILL.md; discover it again if the version moved) and apply it in full.
+
+Model routing: Opus 5.5 plans and reviews every diff; Sonnet subagents write the code. Give each coder explicit file ownership, tell it other agents share the tree, and forbid git stash/checkout/restore/reset and repo-wide `ruff format`. Run coders in parallel only on disjoint files. You (root) run the full suite, lint and whitespace checks, rerun every integration result yourself, and own all docs. Disclose if model routing or skills are unavailable.
+
+State: a large, verified, uncommitted working tree on main. Preserve every edit. Do not commit, push or deploy unless I ask. Never touch .local/data, retained resources, or the stopped forgeapi-floci-test-*/forgeapi-floci-demo-* containers. Last checkpoint: default suite 807 passed, 22 optional Floci skips. Floci (pass --floci): tests/test_floci.py 7, tests/test_floci_features.py 4, tests/test_floci_placed_features.py 11 — all passed through real Temporal + production worker + Terraform on 1.15.9 and 1.16.5. Local Terraform is 1.15.9; the image and CI use 1.16.5 (copy it out of local image forgeapi:hardened-tf1165-20261002 into the session scratchpad and put it on PATH). Start emulators with `docker compose -f compose.floci.yaml -p <unique-project> up -d` (never plain compose.yaml) and remove your project afterwards, verifying zero containers/networks remain.
+
+Last session shipped: GET /patterns, resource filters (pattern/environment/state/label), guardrail and budget discovery, plan-file and workspace cleanup, pattern version upgrades, resource labels, output references (input_refs) with destroy protection, opt-in lazy plan expiry (FORGEAPI_PLAN_MAX_AGE_HOURS), client/CLI support, and three fixes from an independent Opus review.
+
+Testing bar (non-negotiable): every feature must be proven through the real stack — HTTP API → real Temporal (tests.operation_support.temporal_api) → app.worker.build_worker → Terraform → Floci — with independent emulator readbacks, in addition to fast unit tests. Recorded-dispatcher tests alone do not count as done. Never call a skipped or unrun check passed.
+
+Goal: make this the best platform-engineering API for provisioning infrastructure. Hosting target: Temporal on AKS; API and worker run as one pod (deploy/aks/). Don't ask me questions; make reasonable decisions, note them in progress.md, keep shipping back to back.
+
+Start with the "Next" list in docs/session-handoff.md:
+1. Find the intermittent failure of tests/test_drift.py::test_deleted_file_out_of_band_shows_in_drift_and_a_recreate_in_changes (2 of 10 full runs; the test now prints the operation and terraform.log tail on failure). Suspect: per-test provider downloads from the registry. Reproduce, prove the cause, fix it (e.g. a shared read-only provider mirror for tests) — don't just retry.
+2. Add try/finally emulator cleanup to the three Floci suites so a mid-test failure leaves nothing behind.
+3. Prove input_refs consumer apply on Azure and GCP (AWS is done).
+Then pick the next highest-value gap yourself.
+
+For each feature: test first, real Terraform and the real Temporal/Floci stack, full suite green, and update progress.md, session-handoff.md, docs/work-deployment.md and docs/work-prompt.md (including their "Current as of" lines) in the same change. Report actual evidence and limits.

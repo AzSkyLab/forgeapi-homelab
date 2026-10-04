@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     # The same mapping as text, for hosts where the file cannot be baked into the image (it is
     # tenant-specific). Takes precedence over the path. Can come from a Key Vault reference.
     tenants_yaml: str | None = None
+    # With entra auth, background acceptances made in a requester's name (app router, replica
+    # destroys) narrow their snapshotted groups to their current Entra membership, so removing
+    # someone from a group takes effect. Microsoft Graph; the worker identity needs
+    # GroupMember.Read.All.
+    live_group_checks: bool = False
     dev_groups: str = ""  # comma-separated group IDs the caller has when auth_mode is "none"
     # Where the business-unit mapping lives. "file": tenants_path / tenants_yaml (default,
     # unchanged). "db": the `teams` table in the operation ledger's SQLite file, edited through
