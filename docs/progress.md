@@ -2,6 +2,13 @@
 
 Plan and milestone definitions: [rewrite-plan.md](rewrite-plan.md). Go-era progress: [archive-go/progress.md](archive-go/progress.md).
 
+## 2026-10-04 — Merged to main; first hosted CI run passed
+
+At the engineer's request (no PRs): `platform-2026-10` pushed and `main` fast-forwarded to it
+(`1e9cdfd..bd19198`). The push started the first GitHub-hosted run of `.github/workflows/check.yml`
+(run 37240347133): `check` (locked sync, Ruff, default tests) and `image-scan` (both images built,
+Trivy gate) succeeded. Image publication (`image.yml`, on tags) has not run.
+
 ## 2026-10-04 — Real Entra: caller auth through the full stack, live group re-checks via Graph
 
 The engineer provided a lab Entra tenant with a signed-in `az` session ("you can use that to

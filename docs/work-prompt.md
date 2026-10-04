@@ -10,7 +10,7 @@ The 2026-10-02 current-image local smoke passed with image
 isolated API/Temporal engine, root/v1 same-key submission and repeated exact-digest execution,
 real local-file readback, one plan/apply receipt and one accepted audit event per phase.
 All disposable containers/storage/network were removed. This is fresh-install evidence;
-hosted CI, image publication and an older-image upgrade are still unverified. The source
+the first GitHub-hosted Check run passed on `main` `bd19198` (2026-10-04, run 37240347133: `check` and `image-scan` both succeeded); image publication and an older-image upgrade are still unverified. The source
 checkpoint passed 502 tests (seven optional Floci skips); see progress and session-handoff.
 
 
@@ -238,7 +238,7 @@ guide and `docs/progress.md` for commands and operation IDs. This proves emulato
 not work-cloud identity or storage parity. The thin HTTP client, accelerated interruption,
 acceptance/dispatch crash verification, plan/apply/failure replay and quiesced backup/restore
 are implemented locally. Stable pagination, client listing/event pagination and local release
-checks are complete. Hosted execution of the release workflow remains unverified; operator
+checks are complete. The Check workflow has run on GitHub (passed); the image publishing workflow has not; operator
 reconciliation remains manual.
 Distributed storage is needed only if the chosen work host cannot satisfy the single-host
 durable-local-disk requirement.

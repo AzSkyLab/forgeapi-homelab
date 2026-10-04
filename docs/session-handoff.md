@@ -1,7 +1,7 @@
 # Session handoff: continuous API improvement
 
-**Current as of:** 2026-10-04. All work is committed and pushed on branch `platform-2026-10`
-(`origin/platform-2026-10`); the engineer asked for no PRs. Nothing has been published or
+**Current as of:** 2026-10-04. All work is merged into `main` (fast-forward) and also on
+`platform-2026-10`; the engineer asked for no PRs. Nothing has been published or
 deployed. The engineer wants consecutive bounded milestones without
 questions; record decisions in progress. The current state is a verified checkpoint: no test
 run, emulator or agent is pending.
@@ -40,6 +40,9 @@ run, emulator or agent is pending.
 
 ### Latest verified checkpoint
 
+- **Newest (2026-10-04): merged to `main`** (fast-forward to `bd19198`, at the engineer's request;
+  no PRs). First GitHub-hosted Check run passed (run 37240347133: `check`, `image-scan`). Image
+  publication still not run.
 - **Newest (2026-10-04): real Entra verification from the home lab** (engineer-provided lab
   tenant, signed-in `az`; reads and token issuance only, nothing created in Entra/cloud). Real
   tokens through API → Temporal → worker → Terraform → Floci (401s, group-scoped units/envs,

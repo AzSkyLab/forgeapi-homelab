@@ -10,7 +10,7 @@ The 2026-10-02 current-image local smoke passed with image
 isolated API/Temporal engine, root/v1 same-key submission and repeated exact-digest execution,
 real local-file readback, one plan/apply receipt and one accepted audit event per phase.
 All disposable containers/storage/network were removed. This is fresh-install evidence;
-hosted CI, image publication and an older-image upgrade are still unverified. The source
+the first GitHub-hosted Check run passed on `main` `bd19198` (2026-10-04, run 37240347133: `check` and `image-scan` both succeeded); image publication and an older-image upgrade are still unverified. The source
 checkpoint passed 502 tests (seven optional Floci skips); see progress and session-handoff.
 
 
