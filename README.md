@@ -2,7 +2,7 @@
 
 ForgeAPI lets an agent request approved infrastructure through HTTP, inspect a saved Terraform plan, and explicitly execute **that same plan**. FastAPI owns admission and the durable operation ledger; Temporal uses separate plan and apply phase workflows; the worker runs Terraform activities. The agent never receives cloud executor credentials or runs Terraform itself.
 
-**Status (2026-10-02):** the operation API is an **unreleased, uncommitted working tree**. The full local suite passed **689 tests** with seven optional Floci tests skipped, on Terraform 1.15.9 and 1.16.5. A disposable local probe upgraded an older packaged image to the current one with a pending plan, which then executed exactly once; nothing has been deployed to a hosted environment. [Evidence and remaining gates](docs/progress.md) · [Session handoff](docs/session-handoff.md)
+**Status (2026-10-04):** merged on `main`; the GitHub-hosted Check workflow (lint, tests, image build and Trivy scan) passes. The default suite passes **1181 tests** (31 optional tests skipped: Floci emulators and real Microsoft Graph) on Terraform 1.15.9 and 1.16.5. Features are proven through the real stack (HTTP API → Temporal → worker → Terraform → Floci AWS/Azure/GCP); caller sign-in is verified with real Entra tokens. **Not yet deployed** to a hosted environment: the [AKS base](deploy/aks/README.md) is rehearsed on a local kind cluster, and no image has been published. [Evidence and remaining gates](docs/progress.md) · [Session handoff](docs/session-handoff.md)
 
 ## Contents
 
@@ -157,7 +157,13 @@ A Git pattern should use its tag in `version` and set `expected_commit` to the c
 | --- | --- | --- |
 | Onboard a pattern | [docs/pattern-onboarding.md](docs/pattern-onboarding.md) | Template, `python -m app.pattern_check`, register, `GET /patterns/{name}/check` |
 | Multi-cloud HA app | [docs/ha-apps.md](docs/ha-apps.md) | Replicas per cloud + Route 53 failover router; failover is a reviewed plan |
-| Developer portal | `GET /console` | My infrastructure, jobs, history, budgets, projects, landing zones, managed objects; apply/discard with confirmation |
+| Developer portal | `GET /console` | My infrastructure, jobs, history, budgets, projects, landing zones, fleet, apps, self-service deploy, team admin; apply/discard with confirmation |
+| HA app rollout | `POST /v1/apps`, `GET /v1/apps/{id}`, `POST /v1/apps/{id}/approve` | Replicas + router in one request; two exact-digest approval gates; never auto-applies |
+| App failover / teardown | `POST /v1/apps/{id}/failover`, `/destroy`, `/discard` | Swap the primary through a reviewed router plan; ordered, gated teardown |
+| Fleet | `POST /v1/resources/{id}/drift-check`, `/upgrade`, `/promote` | Read-only drift check; re-plan at a new version keeping inputs; copy to another environment at the same commit |
+| Pattern changes and checks | `GET /v1/patterns/{name}/changes`, `/check` | Commits and input diff between versions; static contract checks at the pinned commit |
+| Cost history | `GET /v1/budgets/history` | Daily reserved cost per landing zone, rebuilt from the ledger |
+| Team admin | `/v1/admin/teams…` | Operators only, with `FORGEAPI_TENANTS_SOURCE=db`: create, edit (`If-Match`), validate, revisions, revert, archive, import |
 | Discovery | `GET /v1/agent` | Contract, links, capabilities, allowed patterns |
 | Pattern details | `GET /v1/patterns/{name}` | Inputs, versions, resolved commit, caller-visible metadata |
 | Dry validation | `POST /v1/intents/validate` | Validate without admission or Terraform planning |
@@ -253,7 +259,7 @@ For a backup, stop admissions and **all writers**, including surviving Terraform
 
 ## Placement, identity, budgets, and secrets
 
-Without a tenant mapping, the API uses single-tenant operation rules. Independently, the local default is `FORGEAPI_AUTH_MODE=none`; hosted auth and placement are configured separately. In a placed deployment, the caller selects an allowed business unit, environment, and catalog pattern; **the platform** selects cloud target, region, injected variables, and budget policy. Caller-supplied values for injected variables are refused. The accepted resource cannot silently move to another target; execution and later changes recheck current permission and target identity. The API identity should have no Terraform cloud-deploy rights; the worker holds that execution role. Hosted Easy Auth/JWT integration remains a separate verification gate.
+Without a tenant mapping, the API uses single-tenant operation rules. Independently, the local default is `FORGEAPI_AUTH_MODE=none`; hosted auth and placement are configured separately. In a placed deployment, the caller selects an allowed business unit, environment, and catalog pattern; **the platform** selects cloud target, region, injected variables, and budget policy. Caller-supplied values for injected variables are refused. The accepted resource cannot silently move to another target; execution and later changes recheck current permission and target identity. The API identity should have no Terraform cloud-deploy rights; the worker holds that execution role. `FORGEAPI_AUTH_MODE=entra` is verified with real tokens from a lab Entra tenant: missing, garbage and wrong-audience tokens get 401, and callers see only the business units and environments their groups grant. Opt-in `FORGEAPI_LIVE_GROUP_CHECKS` re-checks an app requester's current Entra groups through Microsoft Graph before work the API later accepts in their name. Easy Auth behind a hosted proxy remains unverified. On AKS the worker uses workload identity; that path is proven against the Floci Azure emulator, not yet against real Entra.
 
 ```mermaid
 flowchart TB
@@ -304,7 +310,7 @@ uv run pytest
 uv run ruff check .
 ```
 
-The normal suite includes local HTTP, SQLite, Git catalog, real Temporal/Terraform lifecycle, interruption, replay, and quiesced restore coverage. Optional three-cloud Floci tests run only with `--floci` (start `docker compose -f compose.floci.yaml -p forgeapi-floci up -d`, then `uv run pytest --floci tests/test_floci.py tests/test_floci_features.py tests/test_floci_placed_features.py`; the second file proves composition, labels/filters, destroy protection, S3-backend version upgrades, discard/expiry and plan cleanup through real Temporal); their setup and lifecycle commands are in the [emulator guide](deploy/emulator/README.md) and [placement demo](deploy/emulator-placement/README.md). Floci is an emulator, so those results do not establish real-cloud IAM, billing, or regional behavior. The isolated current-image smoke used a fresh Docker volume and local-file pattern; its safe evidence is described in [progress](docs/progress.md). A hosted GitHub Actions run, immutable image publication, controlled hosted upgrade, and work-cloud identity remain unverified. Do not treat a local build as those release gates.
+The normal suite includes local HTTP, SQLite, Git catalog, real Temporal/Terraform lifecycle, interruption, replay, and quiesced restore coverage. It also covers Temporal TLS/mTLS through a real handshake (`tests/test_temporal_tls_live.py`). Optional three-cloud Floci tests run only with `--floci` (start `docker compose -f compose.floci.yaml -p forgeapi-floci up -d`, then `uv run pytest --floci tests/test_floci*.py`: lifecycle, placed features, composition, version upgrades, fleet drift/upgrade, HA app rollout/failover/teardown and AKS workload identity through real Temporal); the opt-in real-Graph test needs `FORGEAPI_TEST_ENTRA_OID`, `FORGEAPI_TEST_ENTRA_MEMBER_GROUP` and `FORGEAPI_TEST_ENTRA_NONMEMBER_GROUP` plus an `az` login; their setup and lifecycle commands are in the [emulator guide](deploy/emulator/README.md) and [placement demo](deploy/emulator-placement/README.md). Floci is an emulator, so those results do not establish real-cloud IAM, billing, or regional behavior. The isolated current-image smoke used a fresh Docker volume and local-file pattern; its safe evidence is described in [progress](docs/progress.md). The hosted Check workflow has passed on GitHub; immutable image publication, a controlled hosted upgrade and work-cloud identity remain unverified. Do not treat a local build as those release gates.
 
 | For… | Read… |
 | --- | --- |
@@ -313,6 +319,10 @@ The normal suite includes local HTTP, SQLite, Git catalog, real Temporal/Terrafo
 | Client/server upgrade rules | [API versioning](docs/api-versioning.md) |
 | Tenant mapping, cloud placement, budget reservations | [Tenancy](docs/tenancy.md) |
 | Secret and output conventions | [Outputs](docs/outputs.md) |
+| Onboarding a new Terraform pattern | [Pattern onboarding](docs/pattern-onboarding.md) |
+| Multi-cloud HA apps | [HA apps](docs/ha-apps.md) |
+| Audit trail | [Audit](docs/audit.md) |
+| Deploying on AKS (and the local kind rehearsal) | [AKS base](deploy/aks/README.md) |
 | Work environment deployment and identity requirements | [Work deployment brief](docs/work-deployment.md) and [work prompt](docs/work-prompt.md) |
 | Legacy `/deployments` material | [Archived Temporal guides](docs/archive-temporal/README.md) via the [handoff](docs/session-handoff.md) |
 
