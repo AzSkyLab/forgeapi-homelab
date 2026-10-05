@@ -9,8 +9,7 @@ it has not been applied to AKS.
 
 ## What this is not
 
-Not a Helm chart, not wired into CI, not an ArgoCD source yet. No image has been published to
-back the placeholder below. Treat this as a reviewed starting point, not a verified deployment.
+Not a Helm chart, not wired into CI, not an ArgoCD source yet. Published image for the placeholder below: `ghcr.io/azskylab/forgeapi:v1.0.0` (`sha256:3b67bcdb6821e4211dfd7c7801ec9c1582242521fae61b0794f55a22a107a633`). Treat this as a reviewed starting point, not a verified deployment.
 
 ## Prerequisites
 
@@ -124,13 +123,14 @@ proven at work. Stop at the first failure and record it in `docs/progress.md`.
    `FORGEAPI_LIVE_GROUP_CHECKS`, also Microsoft Graph `GroupMember.Read.All` (application, admin
    consent). **(Not provable in the lab:** the token exchange with real Entra; the provider side
    is proven against Floci.)
-3. **Image.** The engineer pushes tag `v1.0.0` (it must equal `v` + `project.version` in
+3. **Image.** **Done for v1.0.0:** `ghcr.io/azskylab/forgeapi:v1.0.0` (`sha256:3b67bcdb6821e4211dfd7c7801ec9c1582242521fae61b0794f55a22a107a633`). For a later release the engineer pushes tag `v<version>` (it must equal `v` + `project.version` in
    `pyproject.toml`, which the workflow checks) to the GitHub repository that holds this code;
-   `.github/workflows/image.yml` runs the checks and publishes `ghcr.io/<owner>/forgeapi:v1.0.0`
-   with SBOM and provenance. Import it into the work registry (`az acr import --name <acr>
-   --source ghcr.io/<owner>/forgeapi:v1.0.0`, with `--username/--password` if the package is
-   private) and set `images[].newName` to the ACR name and `digest: sha256:...` (instead of
-   `newTag`) in `kustomization.yaml`. The cluster must be allowed to pull from that ACR.
+   `.github/workflows/image.yml` runs the checks and publishes `ghcr.io/<owner>/forgeapi:v<version>`
+   with SBOM and provenance. Import it into the work registry (the v1.0.0 package is public, so no
+   credentials: `az acr import --name <acr> --source ghcr.io/azskylab/forgeapi:v1.0.0 --image
+   forgeapi:v1.0.0`) and set `images[].newName` to `<acr>.azurecr.io/forgeapi` and `digest:` to the
+   digest above (instead of `newTag`) in `kustomization.yaml`; `az acr import` keeps the digest.
+   The cluster must be allowed to pull from that ACR.
 3a. **Temporal.** Ask the Temporal owners for: the frontend address, a namespace registered for
    ForgeAPI (set `FORGEAPI_TEMPORAL_NAMESPACE`), whether TLS/mTLS is required (then the CA and a
    client certificate as the `forgeapi-temporal-tls` Secret), and the frontend port if not 7233

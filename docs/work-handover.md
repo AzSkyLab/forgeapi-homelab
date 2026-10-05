@@ -128,7 +128,7 @@ needs code, tests and a lab proof in this repository first. Ask the engineer if 
 | Live group re-checks | `FORGEAPI_LIVE_GROUP_CHECKS=true` only after Graph `GroupMember.Read.All` is consented for the worker identity. |
 | Drift sweep | `FORGEAPI_DRIFT_SWEEP_MINUTES=360` after the first week. |
 | Plan expiry | `FORGEAPI_PLAN_MAX_AGE_HOURS=24` (already in the ConfigMap). |
-| Image source | Publish by pushing a `v*` tag here (GHCR, with SBOM/provenance), or import that build into the work registry. |
+| Image source | **Published:** `ghcr.io/azskylab/forgeapi:v1.0.0` (`sha256:3b67bcdb6821e4211dfd7c7801ec9c1582242521fae61b0794f55a22a107a633`), public, SBOM and provenance attached; engine image `ghcr.io/azskylab/forgeapi-engine:v1.0.0` (`sha256:649145413ff13c19155426ba9edd8933b443a851652e4baada000070fb87e787`, lab/dev only). Import into the work registry and pin the digest. |
 | Verification pattern | The cheapest real pattern in a dev subscription (for example `resource-group`), plus `azure-identity-check`. |
 | Existing deployments | Side by side (§5). Adoption only as a separate, approved milestone. |
 
@@ -155,11 +155,11 @@ needs code, tests and a lab proof in this repository first. Ask the engineer if 
 | Live group re-checks | Real Microsoft Graph |
 | AKS workload identity | Provider and backend paths against the emulator, Terraform 1.15.9 and 1.16.5 |
 | Temporal TLS/mTLS | Real handshake against a real Temporal server |
-| Hosted CI | GitHub Actions `Check` passes on `main` |
+| Hosted CI and release | GitHub Actions `Check` passes on `main`; `v1.0.0` images published by `image.yml` (run 37251359448) and pulled anonymously |
 
 **Not proven, only provable at work:** the workload-identity token exchange with real Entra; Azure
 Disk; real Azure RBAC and Policy; the work Temporal and its certificates; private networking to
-the state account; Graph consent for the worker identity; a published image; real patterns
+the state account; Graph consent for the worker identity; pulling the published image into the work registry; real patterns
 against real subscriptions. Treat each of these as unverified until you have read it back.
 
 ## 9. Report format (at every gate and at the end)

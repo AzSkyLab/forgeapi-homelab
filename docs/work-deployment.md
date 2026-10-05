@@ -13,7 +13,7 @@ start with the [README](../README.md). This brief remains the deployment-specifi
 isolated API/Temporal engine, root/v1 same-key submission and repeated exact-digest execution,
 real local-file readback, one plan/apply receipt and one accepted audit event per phase.
 All disposable containers/storage/network were removed. This is fresh-install evidence;
-the first GitHub-hosted Check run passed on `main` `bd19198` (2026-10-04, run 37240347133: `check` and `image-scan` both succeeded); image publication and an older-image upgrade are still unverified. That smoke's
+the first GitHub-hosted Check run passed on `main` `bd19198` (2026-10-04, run 37240347133: `check` and `image-scan` both succeeded); `v1.0.0` images were published on 2026-10-05 (run 37251359448): `ghcr.io/azskylab/forgeapi:v1.0.0` (`sha256:3b67bcdb6821e4211dfd7c7801ec9c1582242521fae61b0794f55a22a107a633`) and `ghcr.io/azskylab/forgeapi-engine:v1.0.0` (`sha256:649145413ff13c19155426ba9edd8933b443a851652e4baada000070fb87e787`); an older-image upgrade at work is still unverified. That smoke's
 source checkpoint passed 502 tests; the current default suite is 1181 (see progress).
 
 

@@ -2,6 +2,20 @@
 
 Plan and milestone definitions: [rewrite-plan.md](rewrite-plan.md). Go-era progress: [archive-go/progress.md](archive-go/progress.md).
 
+## 2026-10-05 — Released v1.0.0: images published
+
+At the engineer's request: annotated tag `v1.0.0` on `013abca` (= `main`, CI green; matches
+`project.version`). `.github/workflows/image.yml` run 37251359448: `check` (lint, default suite),
+`image-scan` (both images, Trivy gate) and `publish` all succeeded. Published, public, with SBOM
+and provenance:
+- `ghcr.io/azskylab/forgeapi:v1.0.0` — `sha256:3b67bcdb6821e4211dfd7c7801ec9c1582242521fae61b0794f55a22a107a633`
+- `ghcr.io/azskylab/forgeapi-engine:v1.0.0` — `sha256:649145413ff13c19155426ba9edd8933b443a851652e4baada000070fb87e787`
+  (also tagged `latest` and `sha-013abca…`).
+
+Readback: anonymous registry manifest requests returned 200 with those digests; the pulled
+`forgeapi:v1.0.0` served `/healthz` `{"status":"ok","contract":"agent-v1"}` and contains Terraform
+v1.16.5; smoke container removed. Runbook, handover, README and brief now name the digests.
+
 ## 2026-10-04 — Work handover pack
 
 The engineer asked to prepare the repository so an LLM at work can take it and implement it there;

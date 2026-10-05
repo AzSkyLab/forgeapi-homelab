@@ -40,6 +40,9 @@ run, emulator or agent is pending.
 
 ### Latest verified checkpoint
 
+- **Newest (2026-10-05): v1.0.0 released.** Tag `v1.0.0` (`013abca`); public images
+  `ghcr.io/azskylab/forgeapi:v1.0.0` and `-engine:v1.0.0` (digests in progress). **Next:** the
+  work environment pulls this image (handover runbook step 3).
 - **Newest (2026-10-04): work handover pack.** `docs/work-handover.md` is the entry point for
   the LLM at work (paste `docs/work-prompt.md`); `deploy/aks` now takes the work catalog from a
   required `forgeapi-catalog` ConfigMap (re-rehearsed on kind). **Next:** the engineer runs the
