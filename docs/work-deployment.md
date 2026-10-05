@@ -2,31 +2,34 @@
 
 **Current as of:** 2026-10-04, agent-v1 with Temporal; AKS base rehearsed with Entra auth as shipped and a work-day runbook in `deploy/aks/README.md`; real Entra tokens verified through the full stack and opt-in live group re-checks (`FORGEAPI_LIVE_GROUP_CHECKS`, Microsoft Graph) proven against a real Entra tenant from the home lab; Temporal TLS/mTLS proven in a real handshake and AKS workload identity proven through the stack on Floci Azure (2026-10-04, lab only); continuous drift detection (`drift_check` operations, optional sweep), upgrade detection, one-call upgrades and environment promotion; deployable-pattern placement (422 `cloud_not_available`), pattern changelogs and cost history; pattern onboarding (templates, contract checker CLI and `GET /patterns/{name}/check`); database-backed teams with an operator admin API and portal Teams screens (`FORGEAPI_TENANTS_SOURCE=db`); portal self-service Deploy; fixes from an independent three-part review (team-edit race closed, app workflow liveness, drift sweep limits, diagnostic redaction); one-request multi-cloud HA apps (`POST /apps`, app failover and ordered teardown, two exact-digest approval gates, Temporal rollout; capability `app_rollouts`) and the manual recipe (replicas + Route 53 failover router via `input_refs`, label `app`; [docs/ha-apps.md](ha-apps.md)); built-in developer portal (`GET /console` with an Apps view, capability `web_console`; resource `cloud`/`region`/`estimated_monthly_cost`/`owned_by_caller`/`created_at`/`managed_objects`, discovery `clouds`); failure diagnostics (`diagnostic`, capability `failure_diagnostics`); plan discard, bounded Terraform runs, refusal classification, child-environment filtering, fail-closed unauthenticated mode, resource inventory, operator reconciliation, plan summaries, error reasons, readiness, OpenAPI metadata, operation filters, long-poll, request IDs, Temporal TLS settings, AKS workload identity, an AKS manifest, drift visibility, a hardened image, Terraform 1.16.5, attribute-level plan detail, plan guardrails, resource filters, pattern listing, guardrail discovery, plan-file cleanup, pattern version upgrades, budget discovery, resource labels, output references with destroy protection, opt-in plan expiry and client support for pattern listing and inventory filters (local verification; composition, labels, filters, destroy protection, S3-backend version upgrade, discard/expiry and plan cleanup also proven through real Temporal and Floci AWS on Terraform 1.15.9 and 1.16.5; placed-mode budget/guardrail discovery, budget enforcement, labels, cross-environment ref refusal, locked-environment guardrails and accept-path plan expiry proven on Floci AWS, Azure and GCP; input_refs consumer apply and diagnostic redaction proven on Floci), unreleased. Hosted three-cloud storage consumption is verified on the previous image. The engineer selected Temporal for asynchronous HTTP requests. This brief supersedes the old two-Container-App instructions; those are retained in `docs/archive-temporal/work-deployment.md` for the old release only.
 
+**Implementing this at work? Start with [work-handover.md](work-handover.md)**; this brief is the
+reference it points into (settings, endpoints, limits).
+
 For the system walkthrough, local example and architecture/lifecycle/storage diagrams,
 start with the [README](../README.md). This brief remains the deployment-specific reference.
 
-The 2026-10-02 current-image local smoke passed with image
+*Home-lab history (not a work instruction):* the 2026-10-02 current-image local smoke passed with image
 `sha256:2ff6b29460288abe49204d439ebae9656e10a754f5e39b1084d6b2f2bb8581d9`:
 isolated API/Temporal engine, root/v1 same-key submission and repeated exact-digest execution,
 real local-file readback, one plan/apply receipt and one accepted audit event per phase.
 All disposable containers/storage/network were removed. This is fresh-install evidence;
-the first GitHub-hosted Check run passed on `main` `bd19198` (2026-10-04, run 37240347133: `check` and `image-scan` both succeeded); image publication and an older-image upgrade are still unverified. The source
-checkpoint passed 502 tests (seven optional Floci skips); see progress and session-handoff.
+the first GitHub-hosted Check run passed on `main` `bd19198` (2026-10-04, run 37240347133: `check` and `image-scan` both succeeded); image publication and an older-image upgrade are still unverified. That smoke's
+source checkpoint passed 502 tests; the current default suite is 1181 (see progress).
 
 
-For a new session, read the [session handoff](session-handoff.md) and current progress before acting. The placement demo has verified object upload, exact byte/length/SHA-256 readback, object deletion and API-planned infrastructure cleanup on all three emulators. Do not treat that result as authorization to deploy this working tree in the work environment.
+For a home-lab session, read the [session handoff](session-handoff.md) and current progress before acting; at work, follow [work-handover.md](work-handover.md). The placement demo has verified object upload, exact byte/length/SHA-256 readback, object deletion and API-planned infrastructure cleanup on all three emulators. Do not treat that result as authorization to deploy this working tree in the work environment.
 
 ## First verify the deployment target
 
 The current API and Temporal worker require the **same persistent local disk on one host**. SQLite acceptance, audit, idempotency and budget reservations are transactional; Terraform binary plans must remain available for later exact-plan execution. Temporal schedules phase activities; ledger claims and stable workflow IDs prevent duplicate phase execution.
 
-The organisation's existing MCP server builds separate stateless HTTP Container Apps. **That deployment model does not satisfy this version's storage/runtime requirements.** Do not deploy this working tree as the previous two apps, use Azure Table as its operation ledger, place SQLite on an Azure Files/network share. Report this limitation if that is the only available work target. Continue to use the previous released version for existing hosted deployments.
+The organisation's MCP server (which built the version now running at work) builds separate stateless HTTP Container Apps. **That deployment model does not satisfy this version's storage/runtime requirements.** Do not deploy this working tree as the previous two apps, use Azure Table as its operation ledger, place SQLite on an Azure Files/network share. Report this limitation if that is the only available work target. The supported work target is one pod on AKS: [`deploy/aks`](../deploy/aks/README.md). Continue to use the previous released version for existing hosted deployments.
 
 A supported local/lab target has one host, durable local disk, an API process, Temporal service and Python worker. The root Dockerfile can supply both roles; `compose.yaml` demonstrates their shared bind mount. API command: `uvicorn app.main:app --host 0.0.0.0 --port 8000`. Worker command: `python -m app.worker`. The engine command `python -m app.engine` runs the worker plus a development Temporal server/UI, persisting history in `DATA_DIR/temporal.db`. Setting `FORGEAPI_TEMPORAL_ADDRESS` makes the engine worker-only. A production deployment needs an appropriate external Temporal service. The worker has no HTTP endpoint. Agents call the HTTP API directly using its OpenAPI contract.
 
-Do not set up local development on the work Mac as part of deployment. Confirm the target and report feasibility first. Do not change live resources or migrate their state unless asked. No new real AWS/GCP identity, cloud deployment, role assignment or app registration is authorized by this redesign.
+Do not set up local development on the work Mac as part of deployment. Confirm the target and report feasibility first. Do not change live resources or migrate their state unless asked. Identity, role-assignment and app-registration changes happen only with the engineer's explicit approval at the gates in [work-handover.md](work-handover.md) §7; no AWS/GCP identity is in scope.
 
-## Work simulation hosted on pve-desktop
+## Work simulation hosted on pve-desktop (home lab only)
 
 The engineer's desktop is the HTTP client. The existing `k3s-server-01` guest
 (`10.0.20.10`) on `pve-desktop` hosts one pod with API, Temporal/worker and Floci Azure,
@@ -42,7 +45,7 @@ This is a manually loaded unreleased image; it is not an ArgoCD or work producti
 Cloud emulator state is disposable, while operation history and Terraform state persist.
 After emulator state loss, inspect and replan the same resource ID; never replay an old plan.
 
-## Local storage requirement and lab evidence
+## Local storage requirement and lab evidence (home-lab examples marked)
 
 A persistent local disk directory writable by the API and worker is sufficient for this
 milestone. In the container image both run as UID/GID 1000. Mount the same directory at
@@ -327,7 +330,7 @@ Settings retain their previous names so the catalog, policy and identity code ca
 | Settings | Current treatment |
 | --- | --- |
 | `FORGEAPI_DATA_DIR` | Same durable local directory for API and worker. Holds `operations.sqlite`, audit, plan/state workspaces and command receipts. Preserve existing state. |
-| `FORGEAPI_CATALOG_PATH`, `FORGEAPI_TERRAFORM_BIN` | Catalog path and Terraform binary. Patterns remain external root-module repos, versioned by tag and pinned at acceptance. Bundled `examples/` are local verification only. |
+| `FORGEAPI_CATALOG_PATH`, `FORGEAPI_TERRAFORM_BIN` | Catalog path and Terraform binary. On AKS the catalog comes from the operator-created `forgeapi-catalog` ConfigMap (`/etc/forgeapi/catalog/patterns.yaml`); the image's built-in `patterns.yaml` is the lab's. Patterns remain external root-module repos, versioned by tag and pinned at acceptance. Bundled `examples/` are local verification only. |
 | `FORGEAPI_DB_BACKEND` | Must be `sqlite` for agent-v1. `table` explicitly fails. |
 | `FORGEAPI_AUTH_MODE`, `FORGEAPI_ENTRA_TENANT_ID`, `FORGEAPI_ENTRA_AUDIENCE` | `none` for loopback development; `entra` validates bearer tokens; `easyauth` only behind a trusted proxy that strips caller-supplied principal headers. |
 | `FORGEAPI_TEMPORAL_TLS`, `FORGEAPI_TEMPORAL_TLS_CA_PATH`, `FORGEAPI_TEMPORAL_TLS_CERT_PATH`, `FORGEAPI_TEMPORAL_TLS_KEY_PATH`, `FORGEAPI_TEMPORAL_TLS_SERVER_NAME` | Opt-in TLS to an external Temporal frontend (for example on AKS), used by the API, worker and readiness check. A CA path alone verifies the server; a certificate and key together add mTLS (one without the other refuses to start). Set the server name when it differs from the address. Unset: plain gRPC. Proven in a real handshake (2026-10-04, `tests/test_temporal_tls_live.py`, default suite): API readiness, API dispatch and `build_worker` connected through a client-certificate-requiring TLS terminator (ALPN h2) in front of a real Temporal server and ran a plan → exact-digest apply; a missing client cert, an unrelated CA, a missing server name and plaintext were each refused. Not yet run against the work cluster's own Temporal TLS. |
@@ -426,7 +429,8 @@ that Terraform committed state. Compare the protected Terraform state with indep
 readback; do not print state or raw provider diagnostics into a ticket or agent transcript.
 Preserve the ledger, Temporal history and workspace together. A consistent backup requires
 quiescing all writers, including surviving Terraform children, not merely stopping the API.
-There is no supported endpoint to clear `uncertain`: do not edit the ledger, unlock state,
+Clear `uncertain` only through `POST /v1/operations/{operation_id}/reconcile` (operators; records an
+audited decision, runs no Terraform) after that inspection: never edit the ledger, unlock state,
 reapply the saved plan or submit replacement work as an automatic recovery procedure.
 
-Report the exact revision/image, target/storage feasibility, endpoints tested, operation IDs, independent provider/emulator readback, and every unverified boundary. Do not claim Floci results as Azure/AWS/GCP production proof. Storage consumption, the local HTTP client, interruption/dispatch-crash, plan/apply/failure replay and quiesced restore checks are complete. Stable pagination, client listing and local release checks are complete; release-tag consistency is verified locally; client event pagination passed local HTTP checks; malformed-request boundary proof passed; publishing action pins are verified locally. Operator reconciliation remains manual; real work-cloud identity is still unverified. Transactional remote operation storage, durable exact-plan storage and explicit state migration become necessary if distributed hosting is selected.
+Report the exact revision/image, target/storage feasibility, endpoints tested, operation IDs, independent provider/emulator readback, and every unverified boundary. Do not claim Floci results as Azure/AWS/GCP production proof. Storage consumption, the local HTTP client, interruption/dispatch-crash, plan/apply/failure replay and quiesced restore checks are complete. Stable pagination, client listing and local release checks are complete; release-tag consistency is verified locally; client event pagination passed local HTTP checks; malformed-request boundary proof passed; publishing action pins are verified locally. Operator reconciliation is a manual decision recorded through the reconcile endpoint; real work-cloud identity is still unverified. Transactional remote operation storage, durable exact-plan storage and explicit state migration become necessary if distributed hosting is selected.

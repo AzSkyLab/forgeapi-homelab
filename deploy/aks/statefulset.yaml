@@ -64,6 +64,8 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
+            - {name: catalog, mountPath: /etc/forgeapi/catalog, readOnly: true}
+            # - {name: temporal-tls, mountPath: /etc/forgeapi/temporal-tls, readOnly: true}
           readinessProbe:
             httpGet: {path: /readyz, port: 8000}
             periodSeconds: 10
@@ -99,6 +101,8 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
+            - {name: catalog, mountPath: /etc/forgeapi/catalog, readOnly: true}
+            # - {name: temporal-tls, mountPath: /etc/forgeapi/temporal-tls, readOnly: true}
           # No HTTP endpoint to probe; Kubernetes restarts this container only if the process
           # itself exits (app/worker.py has no built-in self-check beyond that).
           securityContext:
@@ -116,6 +120,16 @@ spec:
         # which is the PVC below, not this emptyDir.
         - name: tmp
           emptyDir: {}
+        # Work catalog; the operator creates this ConfigMap (see configmap.yaml). Required.
+        - name: catalog
+          configMap:
+            name: forgeapi-catalog
+            items: [{key: patterns.yaml, path: patterns.yaml}]
+        # Temporal mTLS (FORGEAPI_TEMPORAL_TLS in configmap.yaml): enable together with the
+        # temporal-tls mounts above; Secret keys ca.pem, client.pem, client.key.
+        # - name: temporal-tls
+        #   secret:
+        #     secretName: forgeapi-temporal-tls
   volumeClaimTemplates:
     - metadata:
         name: data

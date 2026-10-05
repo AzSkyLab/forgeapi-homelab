@@ -9,6 +9,7 @@ resources:
   - statefulset.yaml
   - service.yaml
   - networkpolicy.yaml
+# Production should pin by digest: replace `newTag: TAG` with `digest: sha256:<DIGEST>`.
 images:
   - name: ghcr.io/OWNER/forgeapi
     newName: ghcr.io/OWNER/forgeapi

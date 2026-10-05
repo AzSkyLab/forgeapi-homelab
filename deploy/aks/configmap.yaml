@@ -14,6 +14,18 @@ data:
   FORGEAPI_TEMPORAL_NAMESPACE: "default"
   FORGEAPI_TASK_QUEUE: "forgeapi"
   FORGEAPI_DATA_DIR: "/data"
+  # The work pattern catalog; the operator creates it:
+  #   kubectl create configmap forgeapi-catalog --from-file=patterns.yaml
+  FORGEAPI_CATALOG_PATH: "/etc/forgeapi/catalog/patterns.yaml"
+  # Remote Terraform state (app/terraform.py _backend_args): needed when patterns declare
+  # `backend "azurerm" {}`; without the first two it raises. FORGEAPI_AZURE_SUBSCRIPTION_ID is
+  # the subscription holding the state account (the backend uses it even when a deployment
+  # targets another); it is also the provider's default subscription when no business unit
+  # supplies one. If unset, the backend uses the deployment's own (business unit) subscription.
+  # FORGEAPI_STATE_RESOURCE_GROUP: "<STATE_RESOURCE_GROUP_PLACEHOLDER>"
+  # FORGEAPI_STATE_STORAGE_ACCOUNT: "<STATE_STORAGE_ACCOUNT_PLACEHOLDER>"
+  # FORGEAPI_STATE_CONTAINER: "<STATE_CONTAINER_PLACEHOLDER>"
+  # FORGEAPI_AZURE_SUBSCRIPTION_ID: "<STATE_SUBSCRIPTION_ID_PLACEHOLDER>"
   # A planned operation not executed within this many hours expires; submit a new intent.
   FORGEAPI_PLAN_MAX_AGE_HOURS: "24"
   # Opt-in: re-check an app requester's live Entra groups (Microsoft Graph) before background

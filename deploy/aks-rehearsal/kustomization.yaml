@@ -11,19 +11,16 @@ images:
     newName: forgeapi
     newTag: rehearsal
 configMapGenerator:
-  - name: forgeapi-rehearsal-catalog
+  - name: forgeapi-catalog
     files: [patterns.yaml]
+    options: {disableNameSuffixHash: true}
 patches:
   - target: {kind: ConfigMap, name: forgeapi-config}
     patch: |-
       - {op: replace, path: /data/FORGEAPI_AUTH_MODE, value: "none"}
-      - {op: add, path: /data/FORGEAPI_CATALOG_PATH, value: /etc/forgeapi/catalog/patterns.yaml}
   - target: {kind: StatefulSet, name: forgeapi}
     patch: |-
       - {op: replace, path: /spec/volumeClaimTemplates/0/spec/storageClassName, value: standard}
-      - {op: add, path: /spec/template/spec/volumes/-, value: {name: catalog, configMap: {name: forgeapi-rehearsal-catalog}}}
-      - {op: add, path: /spec/template/spec/containers/0/volumeMounts/-, value: {name: catalog, mountPath: /etc/forgeapi/catalog, readOnly: true}}
-      - {op: add, path: /spec/template/spec/containers/1/volumeMounts/-, value: {name: catalog, mountPath: /etc/forgeapi/catalog, readOnly: true}}
       - {op: add, path: /spec/template/spec/containers/0/imagePullPolicy, value: Never}
       - {op: add, path: /spec/template/spec/containers/1/imagePullPolicy, value: Never}
   - target: {kind: NetworkPolicy, name: forgeapi}

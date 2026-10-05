@@ -40,6 +40,10 @@ run, emulator or agent is pending.
 
 ### Latest verified checkpoint
 
+- **Newest (2026-10-04): work handover pack.** `docs/work-handover.md` is the entry point for
+  the LLM at work (paste `docs/work-prompt.md`); `deploy/aks` now takes the work catalog from a
+  required `forgeapi-catalog` ConfigMap (re-rehearsed on kind). **Next:** the engineer runs the
+  handover at work; fixes and findings come back here.
 - **Newest (2026-10-04): AKS base rehearsed on kind with `entra` auth as shipped** and real
   lab-tenant tokens (401s, group scoping, deploy/destroy through the pod, JWKS through the 443
   egress rule); **work-day runbook** in `deploy/aks/README.md`. **Next:** the work cluster

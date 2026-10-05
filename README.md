@@ -323,7 +323,7 @@ The normal suite includes local HTTP, SQLite, Git catalog, real Temporal/Terrafo
 | Multi-cloud HA apps | [HA apps](docs/ha-apps.md) |
 | Audit trail | [Audit](docs/audit.md) |
 | Deploying on AKS (and the local kind rehearsal) | [AKS base](deploy/aks/README.md) |
-| Work environment deployment and identity requirements | [Work deployment brief](docs/work-deployment.md) and [work prompt](docs/work-prompt.md) |
+| Implementing this at work (from the earlier version running there) | [Work handover](docs/work-handover.md), then the [work deployment brief](docs/work-deployment.md); start the session with the [work prompt](docs/work-prompt.md) |
 | Legacy `/deployments` material | [Archived Temporal guides](docs/archive-temporal/README.md) via the [handoff](docs/session-handoff.md) |
 
 `app.legacy:app` retains the previous deployment API for existing state. It was not migrated into `operations.sqlite`; do not run legacy mutations against the same resources or budgets concurrently with the new operation API.

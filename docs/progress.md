@@ -2,6 +2,34 @@
 
 Plan and milestone definitions: [rewrite-plan.md](rewrite-plan.md). Go-era progress: [archive-go/progress.md](archive-go/progress.md).
 
+## 2026-10-04 — Work handover pack
+
+The engineer asked to prepare the repository so an LLM at work can take it and implement it there;
+work already runs an earlier version (≈ `v0.7.x`: `/deployments` on Container Apps, Easy Auth,
+Table Storage).
+- **New `docs/work-handover.md`** (entry point): read order, ground rules at work, what changed since
+  v0.7.x (no setting removed or renamed; `FORGEAPI_DB_BACKEND` must be `sqlite`), baseline and
+  inventory step for the work repository, side-by-side strategy (old deployment untouched; legacy
+  `app.legacy:app` still serves `/deployments` on Table Storage; adoption not built, with design
+  facts: both versions key state `deployments/<id>.tfstate`), engineer decisions with
+  recommendations, phases 0–7 with gates, proven vs unproven, report format.
+- **`docs/work-prompt.md` rewritten** as a short paste prompt (it had grown to ~250 lines
+  duplicating the brief). `AGENTS.md` gains an **At work** bullet (handover gates and engineer
+  approvals replace the home-lab-only rules) and the hosted identity now says AKS workload identity.
+- **Cold-read review** (a fresh Opus agent role-playing the work LLM) found 15 issues; all fixed:
+  the work catalog had no way into the pod (new required `forgeapi-catalog` ConfigMap mounted in
+  both containers, `FORGEAPI_CATALOG_PATH` in the ConfigMap); v2-token requirement for a reused
+  registration; checkers ordered before the image existed and `pattern_check` cannot read private
+  repos (checks moved after deploy: in-pod `team_check`, `GET /v1/patterns/{name}/check`); image
+  tag must be `v1.0.0`, ACR import, pin by digest; secrets from Key Vault via the AKS secrets
+  provider instead of local files; commented `FORGEAPI_STATE_*`/`FORGEAPI_AZURE_SUBSCRIPTION_ID`
+  and Temporal TLS volume/mounts; brief contradictions (reconcile endpoint exists; Entra changes
+  need approval, not forbidden); lab-only blocks labelled; ingress, Temporal-owner inputs and
+  state-account decisions added.
+- **Proof of the manifest change:** the README's kind rehearsal re-run with the changed base
+  (image from `main`): pod 2/2 Ready, catalog read from the mounted ConfigMap, local-file plan →
+  exact digest → `succeeded` (file read back in the pod) → destroy `succeeded`; cluster deleted.
+
 ## 2026-10-04 — AKS base rehearsed with Entra auth as shipped; work-day runbook
 
 Goal: close "Entra auth on AKS" before the move and turn the work deployment into an ordered
