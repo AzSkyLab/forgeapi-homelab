@@ -27,6 +27,7 @@ Then, in Claude Code:
 
 | File | For |
 |---|---|
+| [QUICKSTART.md](QUICKSTART.md) | Install in 5 minutes, plus a paste-in prompt for your work LLM |
 | [GUIDE.md](GUIDE.md) | The workflow, the loop, spec review checklist, phrases, company rules |
 | [BACKLOG.md](BACKLOG.md) | Step by step: turning existing work into specs |
 
@@ -34,7 +35,7 @@ Then, in Claude Code:
 
 ```
 docs/specdesign/
-├── README.md  GUIDE.md  BACKLOG.md
+├── README.md  QUICKSTART.md  GUIDE.md  BACKLOG.md
 ├── install.sh                     copies the kit into a repo, never overwrites
 └── kit/
     ├── .claude/
@@ -52,7 +53,7 @@ docs/specdesign/
 ```
 
 Installed into a repo it lands as `.claude/`, `specs/templates/`,
-`docs/specdesign/{GUIDE,BACKLOG}.md`, and a spec-driven section in `CLAUDE.md`.
+`docs/specdesign/{QUICKSTART,GUIDE,BACKLOG}.md`, and a spec-driven section in `CLAUDE.md`.
 
 ## Requirements
 

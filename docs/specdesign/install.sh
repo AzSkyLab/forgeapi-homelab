@@ -52,6 +52,7 @@ copy_tree() { # copy_tree <src_dir> <dest_dir>
 
 copy_tree "$kit/.claude" "$target/.claude"
 copy_tree "$kit/templates" "$target/specs/templates"
+copy_file "$here/QUICKSTART.md" "$target/docs/specdesign/QUICKSTART.md"
 copy_file "$here/GUIDE.md" "$target/docs/specdesign/GUIDE.md"
 copy_file "$here/BACKLOG.md" "$target/docs/specdesign/BACKLOG.md"
 [ "$dry" = 1 ] || chmod +x "$target/.claude/skills/changelog/scripts/changelog.py" 2>/dev/null || true
